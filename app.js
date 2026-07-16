@@ -33,6 +33,17 @@ const DEFAULT_CONFIG = {
   settleMs: 250,
 };
 
+const COLORS = {
+  drawing: "#202124",
+  penSimulation: "#0f7b6c",
+  penTravel: "#8a8f98",
+  penUpEvent: "#f59e0b",
+  penDownEvent: "#16a34a",
+  cubePath: "#2563eb",
+  cubeGhost: "#7c3aed",
+  liveCube: "#bd2f2f",
+};
+
 const els = {
   canvas: document.getElementById("plotCanvas"),
   simStatus: document.getElementById("simStatus"),
@@ -339,13 +350,14 @@ function pointInBounds(point, bounds) {
 function draw() {
   ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
   drawMat();
-  for (const stroke of strokes) drawStroke(stroke.processed || stroke.raw, "#202124", 2.2);
-  if (activeStroke) drawStroke(activeStroke.raw, "#202124", 2.2);
+  for (const stroke of strokes) drawStroke(stroke.processed || stroke.raw, COLORS.drawing, 2.2);
+  if (activeStroke) drawStroke(activeStroke.raw, COLORS.drawing, 2.2);
   if (simulation) {
     drawCommands(simulation.commands);
     drawCubePath(simulation.cubePath);
   }
-  if (moveCube && moveCube.pose) drawCubePose(moveCube.pose, "#bd2f2f");
+  if (moveCube && moveCube.pose) drawCubePose(moveCube.pose, COLORS.liveCube, 1, true);
+  drawLegend();
 }
 
 function drawMat() {
@@ -373,11 +385,12 @@ function drawMat() {
   ctx.restore();
 }
 
-function drawStroke(points, color, width) {
+function drawStroke(points, color, width, dash = null) {
   if (!points || points.length < 2) return;
   ctx.save();
   ctx.lineWidth = width * (window.devicePixelRatio || 1);
   ctx.strokeStyle = color;
+  if (dash) ctx.setLineDash(dash.map((value) => value * (window.devicePixelRatio || 1)));
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.beginPath();
@@ -392,27 +405,56 @@ function drawStroke(points, color, width) {
 }
 
 function drawCommands(commands) {
-  const segments = [];
-  let penPoints = [];
+  const downSegments = [];
+  const upSegments = [];
+  const events = [];
+  let downPoints = [];
+  let upPoints = [];
   let penDown = false;
+  let lastPenPoint = null;
   for (const command of commands) {
     if (command.type === "pen") {
-      if (penDown && command.state === "up" && penPoints.length > 1) segments.push(penPoints);
-      if (command.state === "down") penPoints = [];
+      const eventPoint = command.penX == null ? null : { x: command.penX, y: command.penY };
+      if (eventPoint) {
+        events.push({ ...eventPoint, state: command.state });
+        lastPenPoint = eventPoint;
+      }
+      if (penDown && command.state === "up" && downPoints.length > 1) downSegments.push(downPoints);
+      if (!penDown && command.state === "down" && upPoints.length > 1) upSegments.push(upPoints);
+      if (command.state === "down") downPoints = eventPoint ? [eventPoint] : [];
+      if (command.state === "up") upPoints = eventPoint ? [eventPoint] : [];
       penDown = command.state === "down";
     }
-    if (command.type === "move" && penDown) penPoints.push({ x: command.penX, y: command.penY });
+    if (command.type === "move" && command.penX != null) {
+      const point = { x: command.penX, y: command.penY };
+      if (penDown) {
+        downPoints.push(point);
+      } else {
+        if (!upPoints.length && lastPenPoint) upPoints.push(lastPenPoint);
+        upPoints.push(point);
+      }
+      lastPenPoint = point;
+    }
   }
-  if (penDown && penPoints.length > 1) segments.push(penPoints);
-  for (const segment of segments) drawStroke(segment, "#0f7b6c", 1.6);
+  if (penDown && downPoints.length > 1) downSegments.push(downPoints);
+  if (!penDown && upPoints.length > 1) upSegments.push(upPoints);
+  for (const segment of upSegments) drawStroke(segment, COLORS.penTravel, 1.25, [5, 5]);
+  for (const segment of downSegments) drawStroke(segment, COLORS.penSimulation, 1.6);
+  for (const event of events) drawPenEvent(event);
 }
 
 function drawCubePath(points) {
-  drawStroke(points, "#c46f00", 1.3);
-  for (const point of points) drawCubePose({ ...point, theta: config.fixedHeading }, "#c46f00", 0.65);
+  if (!points.length) return;
+  drawStroke(points, COLORS.cubePath, 1.4, [8, 7]);
+  const stride = Math.max(1, Math.ceil(points.length / 18));
+  for (let i = 0; i < points.length; i += stride) {
+    drawCubePose(points[i], COLORS.cubeGhost, 0.36, false);
+  }
+  drawCubePose(points[0], COLORS.cubeGhost, 0.8, false);
+  drawCubePose(points[points.length - 1], COLORS.cubeGhost, 0.9, true);
 }
 
-function drawCubePose(pose, color, alpha = 1) {
+function drawCubePose(pose, color, alpha = 1, filled = false) {
   const center = matToCanvas(pose);
   const size = 32 * getView().scale;
   const theta = degToRad(pose.theta || 0);
@@ -421,12 +463,92 @@ function drawCubePose(pose, color, alpha = 1) {
   ctx.rotate(theta);
   ctx.globalAlpha = alpha;
   ctx.strokeStyle = color;
+  ctx.fillStyle = color;
   ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
+  if (filled) {
+    ctx.globalAlpha = alpha * 0.16;
+    ctx.fillRect(-size / 2, -size / 2, size, size);
+    ctx.globalAlpha = alpha;
+  }
   ctx.strokeRect(-size / 2, -size / 2, size, size);
   ctx.beginPath();
   ctx.moveTo(0, 0);
   ctx.lineTo(size / 2, 0);
   ctx.stroke();
+  ctx.restore();
+}
+
+function drawPenEvent(event) {
+  const dpr = window.devicePixelRatio || 1;
+  const point = matToCanvas(event);
+  const isDown = event.state === "down";
+  const radius = 5 * dpr;
+  ctx.save();
+  ctx.fillStyle = isDown ? COLORS.penDownEvent : COLORS.penUpEvent;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `bold ${10 * dpr}px system-ui`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(isDown ? "↓" : "↑", point.x, point.y - 0.5 * dpr);
+  ctx.restore();
+}
+
+function drawLegend() {
+  const dpr = window.devicePixelRatio || 1;
+  const items = [
+    ["描画線", COLORS.drawing, "solid"],
+    ["pen down 描画", COLORS.penSimulation, "solid"],
+    ["pen up 移動", COLORS.penTravel, "dash"],
+    ["pen down/up", COLORS.penDownEvent, "event"],
+    ["toio移動軌跡", COLORS.cubePath, "dash"],
+    ["toio姿勢", COLORS.cubeGhost, "box"],
+    ["実機toio", COLORS.liveCube, "box"],
+  ];
+  const x = 18 * dpr;
+  const y = 18 * dpr;
+  const lineH = 20 * dpr;
+  const width = 178 * dpr;
+  const height = (items.length * lineH + 12 * dpr);
+
+  ctx.save();
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  ctx.strokeStyle = "#d8d3c8";
+  ctx.lineWidth = 1 * dpr;
+  ctx.fillRect(x, y, width, height);
+  ctx.strokeRect(x, y, width, height);
+  ctx.font = `${11 * dpr}px system-ui`;
+  ctx.textBaseline = "middle";
+
+  items.forEach(([label, color, kind], index) => {
+    const itemY = y + 12 * dpr + index * lineH;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 2 * dpr;
+    if (kind === "dash") ctx.setLineDash([6 * dpr, 5 * dpr]);
+    if (kind === "event") {
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(x + 15 * dpr, itemY, 5 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (kind === "box") {
+      ctx.setLineDash([]);
+      ctx.strokeRect(x + 10 * dpr, itemY - 5 * dpr, 10 * dpr, 10 * dpr);
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(x + 8 * dpr, itemY);
+      ctx.lineTo(x + 24 * dpr, itemY);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#43464a";
+    ctx.fillText(label, x + 32 * dpr, itemY);
+  });
   ctx.restore();
 }
 
@@ -498,35 +620,48 @@ function createSimulation() {
 
   for (const stroke of processedStrokes) {
     if (stroke.processed.length < 2) continue;
-    const firstCube = penToCube(stroke.processed[0]);
-    commands.push({ type: "pen", state: "up" });
-    commands.push({
-      type: "move",
-      x: firstCube.x,
-      y: firstCube.y,
-      theta: config.fixedHeading,
-      speed: config.travelSpeed,
-      penX: stroke.processed[0].x,
-      penY: stroke.processed[0].y,
-    });
-    commands.push({ type: "pen", state: "down" });
 
-    for (const point of stroke.processed) {
-      if (!pointInBounds(point, bounds)) errors.push(`安全領域外の点があります: x=${point.x.toFixed(1)} y=${point.y.toFixed(1)}`);
-      const cube = penToCube(point);
-      if (!pointInBounds(cube, MAT)) warnings.push("toio 本体の目標座標がマット外に出る可能性があります。");
-      cubePath.push(cube);
+    commands.push({ type: "pen", state: "up" });
+
+    for (let i = 0; i < stroke.processed.length - 1; i += 1) {
+      const start = stroke.processed[i];
+      const end = stroke.processed[i + 1];
+      if (distance(start, end) < 0.1) continue;
+      const theta = headingBetween(start, end);
+      const startCube = penToCube(start, theta);
+      const endCube = penToCube(end, theta);
+
+      for (const point of [start, end]) {
+        if (!pointInBounds(point, bounds)) errors.push(`安全領域外の点があります: x=${point.x.toFixed(1)} y=${point.y.toFixed(1)}`);
+      }
+      for (const cube of [startCube, endCube]) {
+        if (!pointInBounds(cube, MAT)) warnings.push("toio 本体の目標座標がマット外に出る可能性があります。");
+      }
+
+      commands.push({ type: "rotate", x: startCube.x, y: startCube.y, theta, speed: config.travelSpeed, penX: start.x, penY: start.y });
       commands.push({
         type: "move",
-        x: cube.x,
-        y: cube.y,
-        theta: config.fixedHeading,
-        speed: config.drawSpeed,
-        penX: point.x,
-        penY: point.y,
+        x: startCube.x,
+        y: startCube.y,
+        theta,
+        speed: config.travelSpeed,
+        penX: start.x,
+        penY: start.y,
       });
+      commands.push({ type: "pen", state: "down", penX: start.x, penY: start.y });
+      commands.push({
+        type: "move",
+        x: endCube.x,
+        y: endCube.y,
+        theta,
+        speed: config.drawSpeed,
+        penX: end.x,
+        penY: end.y,
+      });
+      commands.push({ type: "pen", state: "up", penX: end.x, penY: end.y });
+
+      cubePath.push({ ...startCube, theta }, { ...endCube, theta });
     }
-    commands.push({ type: "pen", state: "up" });
   }
 
   return {
@@ -538,18 +673,23 @@ function createSimulation() {
   };
 }
 
-function penToCube(point) {
+function penToCube(point, theta = config.fixedHeading) {
   const offset = rotatePoint(
     {
       x: config.penOffsetX + config.rotationCenterOffsetX,
       y: config.penOffsetY + config.rotationCenterOffsetY,
     },
-    config.fixedHeading,
+    theta,
   );
   return {
     x: point.x - offset.x,
     y: point.y - offset.y,
   };
+}
+
+function headingBetween(start, end) {
+  const angle = (Math.atan2(end.y - start.y, end.x - start.x) * 180) / Math.PI;
+  return (angle + 360) % 360;
 }
 
 function rotatePoint(point, angleDeg) {
