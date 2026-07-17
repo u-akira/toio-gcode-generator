@@ -111,8 +111,8 @@
 
 ```ts
 type PlotterGeometry = {
-  penOffsetFromReportedCenterX: number;
-  penOffsetFromReportedCenterY: number;
+  penOffsetFromReportedCenterX: number; // 前後方向。toio 前方がプラス、後ろがマイナス。
+  penOffsetFromReportedCenterY: number; // 左右方向。後ろにペンがある機構では基本 0。
   rotationCenterOffsetX: number;
   rotationCenterOffsetY: number;
 };

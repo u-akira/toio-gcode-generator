@@ -70,8 +70,8 @@
           <div class="form-grid">
             <label>安全領域<input id="safeScale" type="number" min="0.5" max="1" step="0.01" /></label>
             <label>初期向き °<input id="fixedHeading" type="number" min="0" max="359" step="1" /></label>
-            <label>ペン X<input id="penOffsetX" type="number" step="1" /></label>
-            <label>ペン Y<input id="penOffsetY" type="number" step="1" /></label>
+            <label>ペン前後 X<input id="penOffsetX" type="number" step="1" /></label>
+            <label>ペン左右 Y<input id="penOffsetY" type="number" step="1" /></label>
             <label>回転中心 X<input id="rotationCenterOffsetX" type="number" step="1" /></label>
             <label>回転中心 Y<input id="rotationCenterOffsetY" type="number" step="1" /></label>
             <label>描画速度<input id="drawSpeed" type="number" min="10" max="255" step="1" /></label>
@@ -79,6 +79,9 @@
             <label>平滑化<input id="smoothing" type="number" min="0" max="1" step="0.05" /></label>
             <label>点間隔<input id="minPointDistance" type="number" min="1" max="30" step="1" /></label>
             <label>角検出 °<input id="cornerAngle" type="number" min="10" max="120" step="1" /></label>
+            <label>直線補正<input id="lineCorrection" type="number" min="0" max="1" step="1" /></label>
+            <label>補正強度<input id="lineTolerance" type="number" min="0" max="40" step="1" /></label>
+            <label>最小線分<input id="minSegmentLength" type="number" min="0" max="80" step="1" /></label>
             <label>Timeout 秒<input id="targetTimeout" type="number" min="1" max="20" step="1" /></label>
           </div>
         </section>
@@ -96,6 +99,7 @@
       </aside>
     </main>
 
+    <script src="plotter-core.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

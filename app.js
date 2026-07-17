@@ -6,32 +6,7 @@ const TOIO = {
   motor: "10b20102-5b3b-4571-9508-cf3efcd7bbae",
 };
 
-const MAT = {
-  minX: 34,
-  minY: 35,
-  maxX: 339,
-  maxY: 250,
-};
-
-const DEFAULT_CONFIG = {
-  safeScale: 0.75,
-  fixedHeading: 0,
-  penOffsetX: 0,
-  penOffsetY: 48,
-  rotationCenterOffsetX: 0,
-  rotationCenterOffsetY: 0,
-  drawSpeed: 35,
-  travelSpeed: 60,
-  smoothing: 0.35,
-  minPointDistance: 4,
-  cornerAngle: 42,
-  targetTimeout: 6,
-  upMotorSpeed: 50,
-  upDurationMs: 300,
-  downMotorSpeed: -50,
-  downDurationMs: 300,
-  settleMs: 250,
-};
+const { MAT, DEFAULT_CONFIG } = window.PlotterCore;
 
 const COLORS = {
   drawing: "#202124",
@@ -77,6 +52,9 @@ const configInputs = [
   "smoothing",
   "minPointDistance",
   "cornerAngle",
+  "lineCorrection",
+  "lineTolerance",
+  "minSegmentLength",
   "targetTimeout",
   "upMotorSpeed",
   "upDurationMs",
@@ -237,7 +215,12 @@ function writeU16(bytes, offset, value) {
 
 function loadConfig() {
   try {
-    return { ...DEFAULT_CONFIG, ...JSON.parse(localStorage.getItem("toioPlotterConfig") || "{}") };
+    const saved = JSON.parse(localStorage.getItem("toioPlotterConfig") || "{}");
+    if (!saved.configVersion && saved.penOffsetX === 0 && saved.penOffsetY === 48) {
+      saved.penOffsetX = DEFAULT_CONFIG.penOffsetX;
+      saved.penOffsetY = DEFAULT_CONFIG.penOffsetY;
+    }
+    return { ...DEFAULT_CONFIG, ...saved, configVersion: DEFAULT_CONFIG.configVersion };
   } catch {
     return { ...DEFAULT_CONFIG };
   }
@@ -253,13 +236,26 @@ function syncConfigToForm() {
   }
 }
 
-function readConfigFromForm() {
+function applyConfigFromForm({ invalidate = true } = {}) {
+  let changed = false;
   for (const [key, input] of Object.entries(configInputs)) {
-    config[key] = Number(input.value);
+    const value = Number(input.value);
+    if (config[key] !== value) changed = true;
+    config[key] = value;
   }
-  saveConfig();
-  invalidateSimulation("設定を変更しました");
-  draw();
+  if (changed) {
+    saveConfig();
+    if (invalidate) {
+      simulation = null;
+      invalidateSimulation("設定を変更しました");
+      draw();
+    }
+  }
+  return changed;
+}
+
+function readConfigFromForm() {
+  applyConfigFromForm({ invalidate: true });
 }
 
 function invalidateSimulation(reason) {
@@ -330,17 +326,7 @@ function canvasToMat(clientX, clientY) {
 }
 
 function safeBounds() {
-  const scale = clamp(config.safeScale, 0.5, 1);
-  const centerX = (MAT.minX + MAT.maxX) / 2;
-  const centerY = (MAT.minY + MAT.maxY) / 2;
-  const halfW = ((MAT.maxX - MAT.minX) * scale) / 2;
-  const halfH = ((MAT.maxY - MAT.minY) * scale) / 2;
-  return {
-    minX: centerX - halfW,
-    maxX: centerX + halfW,
-    minY: centerY - halfH,
-    maxY: centerY + halfH,
-  };
+  return window.PlotterCore.safeBounds(config);
 }
 
 function pointInBounds(point, bounds) {
@@ -553,156 +539,15 @@ function drawLegend() {
 }
 
 function processStroke(raw) {
-  const reduced = reducePoints(raw, config.minPointDistance);
-  const sections = splitAtCorners(reduced, config.cornerAngle);
-  const processed = [];
-  for (const section of sections) {
-    const smoothed = smoothPoints(section, config.smoothing);
-    if (processed.length && smoothed.length) smoothed.shift();
-    processed.push(...smoothed);
-  }
-  return processed.length >= 2 ? processed : reduced;
-}
-
-function reducePoints(points, minDistance) {
-  if (points.length < 2) return [...points];
-  const result = [points[0]];
-  for (let i = 1; i < points.length; i += 1) {
-    if (distance(points[i], result[result.length - 1]) >= minDistance) result.push(points[i]);
-  }
-  const last = points[points.length - 1];
-  if (distance(last, result[result.length - 1]) > 0.1) result.push(last);
-  return result;
-}
-
-function splitAtCorners(points, angleThreshold) {
-  if (points.length < 3) return [points];
-  const sections = [];
-  let section = [points[0]];
-  for (let i = 1; i < points.length - 1; i += 1) {
-    section.push(points[i]);
-    if (turnAngle(points[i - 1], points[i], points[i + 1]) >= angleThreshold) {
-      sections.push(section);
-      section = [points[i]];
-    }
-  }
-  section.push(points[points.length - 1]);
-  sections.push(section);
-  return sections;
-}
-
-function smoothPoints(points, strength) {
-  const amount = clamp(strength, 0, 1);
-  if (points.length < 4 || amount <= 0) return [...points];
-  let current = points.map((point) => ({ ...point }));
-  const passes = Math.max(1, Math.round(amount * 4));
-  for (let pass = 0; pass < passes; pass += 1) {
-    const next = [current[0]];
-    for (let i = 1; i < current.length - 1; i += 1) {
-      next.push({
-        x: current[i].x * (1 - amount * 0.5) + (current[i - 1].x + current[i + 1].x) * amount * 0.25,
-        y: current[i].y * (1 - amount * 0.5) + (current[i - 1].y + current[i + 1].y) * amount * 0.25,
-      });
-    }
-    next.push(current[current.length - 1]);
-    current = next;
-  }
-  return current;
+  return window.PlotterCore.processStroke(raw, config);
 }
 
 function createSimulation() {
-  const bounds = safeBounds();
-  const commands = [];
-  const cubePath = [];
-  const errors = [];
-  const warnings = [];
-  const processedStrokes = strokes.map((stroke) => ({ ...stroke, processed: processStroke(stroke.raw) }));
-
-  for (const stroke of processedStrokes) {
-    if (stroke.processed.length < 2) continue;
-
-    commands.push({ type: "pen", state: "up" });
-
-    for (let i = 0; i < stroke.processed.length - 1; i += 1) {
-      const start = stroke.processed[i];
-      const end = stroke.processed[i + 1];
-      if (distance(start, end) < 0.1) continue;
-      const theta = headingBetween(start, end);
-      const startCube = penToCube(start, theta);
-      const endCube = penToCube(end, theta);
-
-      for (const point of [start, end]) {
-        if (!pointInBounds(point, bounds)) errors.push(`安全領域外の点があります: x=${point.x.toFixed(1)} y=${point.y.toFixed(1)}`);
-      }
-      for (const cube of [startCube, endCube]) {
-        if (!pointInBounds(cube, MAT)) warnings.push("toio 本体の目標座標がマット外に出る可能性があります。");
-      }
-
-      commands.push({ type: "rotate", x: startCube.x, y: startCube.y, theta, speed: config.travelSpeed, penX: start.x, penY: start.y });
-      commands.push({
-        type: "move",
-        x: startCube.x,
-        y: startCube.y,
-        theta,
-        speed: config.travelSpeed,
-        penX: start.x,
-        penY: start.y,
-      });
-      commands.push({ type: "pen", state: "down", penX: start.x, penY: start.y });
-      commands.push({
-        type: "move",
-        x: endCube.x,
-        y: endCube.y,
-        theta,
-        speed: config.drawSpeed,
-        penX: end.x,
-        penY: end.y,
-      });
-      commands.push({ type: "pen", state: "up", penX: end.x, penY: end.y });
-
-      cubePath.push({ ...startCube, theta }, { ...endCube, theta });
-    }
-  }
-
-  return {
-    commands,
-    cubePath,
-    processedStrokes,
-    errors: [...new Set(errors)].slice(0, 5),
-    warnings: [...new Set(warnings)].slice(0, 3),
-  };
-}
-
-function penToCube(point, theta = config.fixedHeading) {
-  const offset = rotatePoint(
-    {
-      x: config.penOffsetX + config.rotationCenterOffsetX,
-      y: config.penOffsetY + config.rotationCenterOffsetY,
-    },
-    theta,
-  );
-  return {
-    x: point.x - offset.x,
-    y: point.y - offset.y,
-  };
-}
-
-function headingBetween(start, end) {
-  const angle = (Math.atan2(end.y - start.y, end.x - start.x) * 180) / Math.PI;
-  return (angle + 360) % 360;
-}
-
-function rotatePoint(point, angleDeg) {
-  const angle = degToRad(angleDeg);
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  return {
-    x: point.x * cos - point.y * sin,
-    y: point.x * sin + point.y * cos,
-  };
+  return window.PlotterCore.createSimulation({ strokes, config });
 }
 
 function runSimulation() {
+  applyConfigFromForm({ invalidate: false });
   simulation = createSimulation();
   strokes = simulation.processedStrokes;
   if (!simulation.commands.length) {
@@ -720,7 +565,12 @@ function runSimulation() {
     els.runBtn.disabled = false;
     setPill(els.simStatus, "成功", "ok");
     const warn = simulation.warnings.length ? `\n警告: ${simulation.warnings.join(" ")}` : "";
-    log(`シミュレーション成功: ${simulation.commands.length} commands${warn}`);
+    const stats = simulation.stats;
+    log(
+      `シミュレーション成功: ${simulation.commands.length} commands, ` +
+        `${stats.drawSegments} draw segments, pen down ${stats.penDowns}, pen up ${stats.penUps}, ` +
+        `points ${stats.rawPoints} -> ${stats.processedPoints}${warn}`,
+    );
   }
   draw();
 }
@@ -847,7 +697,8 @@ function turnAngle(a, b, c) {
   const denom = Math.hypot(ab.x, ab.y) * Math.hypot(cb.x, cb.y);
   if (!denom) return 0;
   const dot = (ab.x * cb.x + ab.y * cb.y) / denom;
-  return (Math.acos(clamp(dot, -1, 1)) * 180) / Math.PI;
+  const angle = (Math.acos(clamp(dot, -1, 1)) * 180) / Math.PI;
+  return 180 - angle;
 }
 
 function clamp(value, min, max) {
@@ -912,7 +763,10 @@ function bindEvents() {
     }
   });
 
-  for (const input of Object.values(configInputs)) input.addEventListener("change", readConfigFromForm);
+  for (const input of Object.values(configInputs)) {
+    input.addEventListener("input", readConfigFromForm);
+    input.addEventListener("change", readConfigFromForm);
+  }
 }
 
 function init() {
