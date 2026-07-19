@@ -23,7 +23,7 @@ test("buildTimedMotorCommand can drive wheels in opposite directions", () => {
 });
 
 test("buildTimedMotorCommand supports backward pen-up travel", () => {
-  assert.deepEqual([...toio.buildTimedMotorCommand(-50, 300, 0)], [0x02, 0x01, 0x02, 50, 0x02, 0x02, 50, 30]);
+  assert.deepEqual([...toio.buildTimedMotorCommand(-30, 300, 0)], [0x02, 0x01, 0x02, 30, 0x02, 0x02, 30, 30]);
 });
 
 test("buildTargetMoveCommand writes target fields little-endian", () => {
@@ -39,6 +39,7 @@ test("buildTargetMoveCommand writes target fields little-endian", () => {
   assert.equal(bytes[0], 0x03);
   assert.equal(bytes[1], 7);
   assert.equal(bytes[2], 6);
+  assert.equal(bytes[3], 1);
   assert.equal(bytes[4], 40);
   assert.equal(bytes[7], 0x2c);
   assert.equal(bytes[8], 0x01);
@@ -46,6 +47,20 @@ test("buildTargetMoveCommand writes target fields little-endian", () => {
   assert.equal(bytes[10], 0x00);
   assert.equal(bytes[11], 90);
   assert.equal(bytes[12], 0);
+});
+
+test("buildTargetMoveCommand can override movement type", () => {
+  const bytes = toio.buildTargetMoveCommand({
+    id: 1,
+    x: 250,
+    y: 250,
+    theta: 0,
+    speed: 20,
+    timeoutSec: 6,
+    movementType: 0,
+  });
+
+  assert.equal(bytes[3], 0);
 });
 
 test("parseIdNotification parses Position ID", () => {

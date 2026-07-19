@@ -15,6 +15,9 @@ const COLORS = {
 };
 
 const PLAY_MAT_IMAGE_SRC = "image/playmat-position-id-01.png";
+const POSITION_FRESH_MS = 500;
+const POSITION_HOLD_MS = 1500;
+const POSITION_RUN_TIMEOUT_MS = 1000;
 
 const els = {
   canvas: document.getElementById("plotCanvas"),
@@ -76,6 +79,9 @@ let abortRun = false;
 let moveCube = null;
 let penCube = null;
 let playMatImageLoaded = false;
+let lastMovePose = null;
+let lastMovePoseAt = 0;
+let lastMovePoseState = "missed";
 
 const playMatImage = new Image();
 playMatImage.onload = () => {
@@ -100,6 +106,21 @@ function loadConfig() {
       saved.upMotorSpeed = DEFAULT_CONFIG.upMotorSpeed;
       saved.downMotorSpeed = DEFAULT_CONFIG.downMotorSpeed;
       saved.penMotorMode = DEFAULT_CONFIG.penMotorMode;
+    }
+    if ((saved.configVersion || 0) < 4) {
+      saved.travelSpeed = DEFAULT_CONFIG.travelSpeed;
+      saved.upMotorSpeed = DEFAULT_CONFIG.upMotorSpeed;
+      saved.downMotorSpeed = DEFAULT_CONFIG.downMotorSpeed;
+    }
+    if ((saved.configVersion || 0) < 5) {
+      saved.drawSpeed = DEFAULT_CONFIG.drawSpeed;
+      saved.travelSpeed = DEFAULT_CONFIG.travelSpeed;
+    }
+    if ((saved.configVersion || 0) < 6) {
+      saved.upMotorSpeed = DEFAULT_CONFIG.upMotorSpeed;
+    }
+    if ((saved.configVersion || 0) < 7) {
+      saved.upMotorSpeed = DEFAULT_CONFIG.upMotorSpeed;
     }
     return { ...DEFAULT_CONFIG, ...saved, configVersion: DEFAULT_CONFIG.configVersion };
   } catch {
@@ -223,7 +244,10 @@ function draw() {
     drawCommands(simulation.commands);
     drawCubePath(simulation.cubePath);
   }
-  if (moveCube && moveCube.pose) drawCubePose(nativeToMatPose(moveCube.pose), COLORS.liveCube, 1, true);
+  const poseStatus = getMovePoseStatus();
+  if (poseStatus.pose && poseStatus.state !== "missed") {
+    drawCubePose(nativeToMatPose(poseStatus.pose), COLORS.liveCube, poseStatus.state === "unstable" ? 0.42 : 1, true);
+  }
   drawLegend();
 }
 
@@ -468,7 +492,7 @@ async function runToio() {
     log("移動用と昇降用の toio を接続してください。");
     return;
   }
-  if (!moveCube.pose) {
+  if (!hasFreshMovePose(POSITION_FRESH_MS)) {
     log("移動用 toio の Position ID が未取得です。プレイマット上に置き、赤い実機toio表示が出てから実行してください。");
     setPill(els.runStatus, "Position ID 未取得", "error");
     return;
@@ -484,7 +508,7 @@ async function runToio() {
       if (command.type === "pen") {
         await setPen(command.state);
       } else if (command.type === "move" || command.type === "rotate") {
-        if (!moveCube.pose) {
+        if (!hasFreshMovePose(POSITION_RUN_TIMEOUT_MS)) {
           throw new Error("移動用 toio の Position ID を見失いました。マット上で再取得してから実行してください。");
         }
         const nativePoint = matToNativePoint(command);
@@ -617,9 +641,46 @@ function connectedName(cube) {
   return cube?.device?.name || "未接続";
 }
 
+function getMovePoseStatus(now = Date.now()) {
+  if (!lastMovePose) return { state: "missed", pose: null, ageMs: Infinity };
+  const ageMs = now - lastMovePoseAt;
+  if (ageMs <= POSITION_FRESH_MS) return { state: "fresh", pose: lastMovePose, ageMs };
+  if (ageMs <= POSITION_HOLD_MS) return { state: "unstable", pose: lastMovePose, ageMs };
+  return { state: "missed", pose: null, ageMs };
+}
+
+function hasFreshMovePose(maxAgeMs) {
+  return Boolean(lastMovePose && Date.now() - lastMovePoseAt <= maxAgeMs);
+}
+
+function updateMovePoseText(status = getMovePoseStatus()) {
+  lastMovePoseState = status.state;
+  if (status.state === "fresh") {
+    const matPose = nativeToMatPose(status.pose);
+    els.positionState.textContent = `x:${matPose.x.toFixed(1)} y:${matPose.y.toFixed(1)} θ:${matPose.theta}`;
+  } else if (status.state === "unstable") {
+    els.positionState.textContent = "Position ID unstable";
+  } else {
+    els.positionState.textContent = "Position ID missed";
+  }
+}
+
+function refreshMovePoseStatus() {
+  if (!moveCube || !lastMovePose) return;
+  const previous = lastMovePoseState;
+  const status = getMovePoseStatus();
+  if (status.state !== previous) {
+    updateMovePoseText(status);
+    draw();
+  }
+}
+
 function setMoveCube(cube) {
   moveCube = cube;
   if (!cube) {
+    lastMovePose = null;
+    lastMovePoseAt = 0;
+    lastMovePoseState = "missed";
     els.moveCubeState.textContent = "未接続";
     els.positionState.textContent = "未取得";
     return;
@@ -629,20 +690,21 @@ function setMoveCube(cube) {
     els.moveCubeState.textContent = status;
   };
   cube.onPose = (pose) => {
-    const matPose = nativeToMatPose(pose);
-    els.positionState.textContent = `x:${matPose.x.toFixed(1)} y:${matPose.y.toFixed(1)} θ:${pose.theta}`;
+    lastMovePose = pose;
+    lastMovePoseAt = Date.now();
+    updateMovePoseText({ state: "fresh", pose, ageMs: 0 });
     draw();
   };
   cube.onPositionMissed = () => {
-    cube.pose = null;
-    els.positionState.textContent = "Position ID missed";
+    updateMovePoseText();
     draw();
   };
   cube.onLog = log;
   els.moveCubeState.textContent = connectedName(cube);
   if (cube.pose) {
-    const matPose = nativeToMatPose(cube.pose);
-    els.positionState.textContent = `x:${matPose.x.toFixed(1)} y:${matPose.y.toFixed(1)} θ:${matPose.theta}`;
+    lastMovePose = cube.pose;
+    lastMovePoseAt = Date.now();
+    updateMovePoseText({ state: "fresh", pose: cube.pose, ageMs: 0 });
   }
 }
 
@@ -740,6 +802,7 @@ function bindEvents() {
 function init() {
   syncConfigToForm();
   bindEvents();
+  window.setInterval(refreshMovePoseStatus, 250);
   resizeCanvasBackingStore();
   setPill(els.simStatus, "未シミュレーション", "warn");
   log("準備完了。フリーハンドで描画してください。");

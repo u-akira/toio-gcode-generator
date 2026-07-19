@@ -70,7 +70,6 @@
         this.pose = parsed.pose;
         this.onPose(parsed.pose);
       } else if (parsed.type === "missed") {
-        this.pose = null;
         this.onPositionMissed();
       }
     }
@@ -196,12 +195,12 @@
     return direction === 0x01 ? 0x02 : 0x01;
   }
 
-  function buildTargetMoveCommand({ id, x, y, theta, speed, timeoutSec }) {
+  function buildTargetMoveCommand({ id, x, y, theta, speed, timeoutSec, movementType = 1 }) {
     const bytes = new Uint8Array(13);
     bytes[0] = 0x03;
     bytes[1] = clamp(Math.round(id), 0, 255);
     bytes[2] = clamp(Math.round(timeoutSec), 1, 255);
-    bytes[3] = 0x00;
+    bytes[3] = clamp(Math.round(movementType), 0, 2);
     bytes[4] = clamp(Math.round(speed), 10, 255);
     bytes[5] = 0x00;
     bytes[6] = 0x00;
