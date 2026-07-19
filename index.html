@@ -45,6 +45,7 @@
           <div class="button-grid">
             <button id="connectMoveBtn" type="button">移動用 接続</button>
             <button id="connectPenBtn" type="button">昇降用 接続</button>
+            <button id="swapRolesBtn" type="button">役割入替</button>
           </div>
           <dl class="mini-log">
             <div><dt>移動用</dt><dd id="moveCubeState">未接続</dd></div>
@@ -93,6 +94,7 @@
             <label>Up ms<input id="upDurationMs" type="number" min="10" max="2550" step="10" /></label>
             <label>Down 速度<input id="downMotorSpeed" type="number" min="-255" max="255" step="1" /></label>
             <label>Down ms<input id="downDurationMs" type="number" min="10" max="2550" step="10" /></label>
+            <label>昇降方式<input id="penMotorMode" type="number" min="0" max="1" step="1" /></label>
             <label>待ち ms<input id="settleMs" type="number" min="0" max="2000" step="10" /></label>
           </div>
         </section>
@@ -100,6 +102,7 @@
     </main>
 
     <script src="plotter-core.js"></script>
+    <script src="toio-ble.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

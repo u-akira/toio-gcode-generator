@@ -1,12 +1,7 @@
 "use strict";
 
-const TOIO = {
-  service: "10b20100-5b3b-4571-9508-cf3efcd7bbae",
-  id: "10b20101-5b3b-4571-9508-cf3efcd7bbae",
-  motor: "10b20102-5b3b-4571-9508-cf3efcd7bbae",
-};
-
-const { MAT, DEFAULT_CONFIG } = window.PlotterCore;
+const { MAT, DEFAULT_CONFIG, nativeToMatPose, matToNativePoint } = window.PlotterCore;
+const { ToioCube } = window.ToioBle;
 
 const COLORS = {
   drawing: "#202124",
@@ -18,6 +13,8 @@ const COLORS = {
   cubeGhost: "#7c3aed",
   liveCube: "#bd2f2f",
 };
+
+const PLAY_MAT_IMAGE_SRC = "image/playmat-position-id-01.png";
 
 const els = {
   canvas: document.getElementById("plotCanvas"),
@@ -33,6 +30,7 @@ const els = {
   importInput: document.getElementById("importInput"),
   connectMoveBtn: document.getElementById("connectMoveBtn"),
   connectPenBtn: document.getElementById("connectPenBtn"),
+  swapRolesBtn: document.getElementById("swapRolesBtn"),
   simulateBtn: document.getElementById("simulateBtn"),
   runBtn: document.getElementById("runBtn"),
   stopBtn: document.getElementById("stopBtn"),
@@ -60,6 +58,7 @@ const configInputs = [
   "upDurationMs",
   "downMotorSpeed",
   "downDurationMs",
+  "penMotorMode",
   "settleMs",
 ].reduce((map, id) => {
   map[id] = document.getElementById(id);
@@ -76,142 +75,19 @@ let running = false;
 let abortRun = false;
 let moveCube = null;
 let penCube = null;
+let playMatImageLoaded = false;
 
-class ToioCube {
-  constructor(role, statusEl) {
-    this.role = role;
-    this.statusEl = statusEl;
-    this.device = null;
-    this.server = null;
-    this.idChar = null;
-    this.motorChar = null;
-    this.pose = null;
-    this.nextTargetId = 1;
-    this.pendingTargets = new Map();
-  }
-
-  async connect() {
-    if (!navigator.bluetooth) {
-      throw new Error("このブラウザは Web Bluetooth に対応していません。PC の Chrome / Edge を使ってください。");
-    }
-
-    this.device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [TOIO.service] }],
-      optionalServices: [TOIO.service],
-    });
-
-    this.device.addEventListener("gattserverdisconnected", () => {
-      this.statusEl.textContent = "切断";
-      this.pose = null;
-    });
-
-    this.server = await this.device.gatt.connect();
-    const service = await this.server.getPrimaryService(TOIO.service);
-    this.idChar = await service.getCharacteristic(TOIO.id);
-    this.motorChar = await service.getCharacteristic(TOIO.motor);
-
-    await this.idChar.startNotifications();
-    this.idChar.addEventListener("characteristicvaluechanged", (event) => this.handleId(event.target.value));
-
-    await this.motorChar.startNotifications();
-    this.motorChar.addEventListener("characteristicvaluechanged", (event) => this.handleMotor(event.target.value));
-
-    this.statusEl.textContent = this.device.name || "接続済み";
-    log(`${this.role} toio を接続しました`);
-  }
-
-  handleId(value) {
-    if (value.getUint8(0) === 0x01 && value.byteLength >= 13) {
-      this.pose = {
-        x: value.getUint16(1, true),
-        y: value.getUint16(3, true),
-        theta: value.getUint16(5, true),
-        sensorX: value.getUint16(7, true),
-        sensorY: value.getUint16(9, true),
-        sensorTheta: value.getUint16(11, true),
-      };
-      if (this.role === "移動用") {
-        els.positionState.textContent = `x:${this.pose.x} y:${this.pose.y} θ:${this.pose.theta}`;
-        draw();
-      }
-    } else if (value.getUint8(0) === 0x03 && this.role === "移動用") {
-      els.positionState.textContent = "Position ID missed";
-    }
-  }
-
-  handleMotor(value) {
-    const kind = value.getUint8(0);
-    if (kind !== 0x83 || value.byteLength < 3) return;
-    const id = value.getUint8(1);
-    const result = value.getUint8(2);
-    const pending = this.pendingTargets.get(id);
-    if (!pending) return;
-    this.pendingTargets.delete(id);
-    if (result === 0x00) {
-      pending.resolve();
-    } else {
-      pending.reject(new Error(`toio target ${id} failed: 0x${result.toString(16).padStart(2, "0")}`));
-    }
-  }
-
-  async write(bytes) {
-    if (!this.motorChar) throw new Error(`${this.role} toio が未接続です。`);
-    await this.motorChar.writeValueWithoutResponse(Uint8Array.from(bytes));
-  }
-
-  async stop() {
-    if (!this.motorChar) return;
-    await this.write([0x01, 0x01, 0x01, 0x00, 0x02, 0x01, 0x00]);
-  }
-
-  async timedMotor(speed, durationMs) {
-    const duration = clamp(Math.round(durationMs / 10), 1, 255);
-    const direction = speed >= 0 ? 0x01 : 0x02;
-    const amount = clamp(Math.abs(Math.round(speed)), 0, 255);
-    await this.write([0x02, 0x01, direction, amount, 0x02, direction, amount, duration]);
-  }
-
-  async moveTo(x, y, theta, speed, timeoutSec) {
-    const id = this.nextTargetId;
-    this.nextTargetId = (this.nextTargetId + 1) & 0xff;
-    const bytes = new Uint8Array(13);
-    bytes[0] = 0x03;
-    bytes[1] = id;
-    bytes[2] = clamp(Math.round(timeoutSec), 1, 255);
-    bytes[3] = 0x00;
-    bytes[4] = clamp(Math.round(speed), 10, 255);
-    bytes[5] = 0x00;
-    bytes[6] = 0x00;
-    writeU16(bytes, 7, clamp(Math.round(x), 0, 0xffff));
-    writeU16(bytes, 9, clamp(Math.round(y), 0, 0xffff));
-    writeU16(bytes, 11, clamp(Math.round(theta) % 360, 0, 0x1fff));
-
-    const promise = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingTargets.delete(id);
-        reject(new Error(`toio target ${id} response timeout`));
-      }, (timeoutSec + 3) * 1000);
-      this.pendingTargets.set(id, {
-        resolve: () => {
-          clearTimeout(timeout);
-          resolve();
-        },
-        reject: (error) => {
-          clearTimeout(timeout);
-          reject(error);
-        },
-      });
-    });
-
-    await this.motorChar.writeValueWithoutResponse(bytes);
-    return promise;
-  }
-}
-
-function writeU16(bytes, offset, value) {
-  bytes[offset] = value & 0xff;
-  bytes[offset + 1] = (value >> 8) & 0xff;
-}
+const playMatImage = new Image();
+playMatImage.onload = () => {
+  playMatImageLoaded = true;
+  draw();
+};
+playMatImage.onerror = () => {
+  playMatImageLoaded = false;
+  log(`プレイマット画像を読み込めませんでした: ${PLAY_MAT_IMAGE_SRC}`);
+  draw();
+};
+playMatImage.src = PLAY_MAT_IMAGE_SRC;
 
 function loadConfig() {
   try {
@@ -219,6 +95,11 @@ function loadConfig() {
     if (!saved.configVersion && saved.penOffsetX === 0 && saved.penOffsetY === 48) {
       saved.penOffsetX = DEFAULT_CONFIG.penOffsetX;
       saved.penOffsetY = DEFAULT_CONFIG.penOffsetY;
+    }
+    if ((saved.configVersion || 0) < 3) {
+      saved.upMotorSpeed = DEFAULT_CONFIG.upMotorSpeed;
+      saved.downMotorSpeed = DEFAULT_CONFIG.downMotorSpeed;
+      saved.penMotorMode = DEFAULT_CONFIG.penMotorMode;
     }
     return { ...DEFAULT_CONFIG, ...saved, configVersion: DEFAULT_CONFIG.configVersion };
   } catch {
@@ -342,7 +223,7 @@ function draw() {
     drawCommands(simulation.commands);
     drawCubePath(simulation.cubePath);
   }
-  if (moveCube && moveCube.pose) drawCubePose(moveCube.pose, COLORS.liveCube, 1, true);
+  if (moveCube && moveCube.pose) drawCubePose(nativeToMatPose(moveCube.pose), COLORS.liveCube, 1, true);
   drawLegend();
 }
 
@@ -354,6 +235,9 @@ function drawMat() {
   ctx.strokeStyle = "#9d9588";
   ctx.fillStyle = "#fffdf8";
   ctx.fillRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
+  if (playMatImageLoaded) {
+    ctx.drawImage(playMatImage, p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
+  }
   ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
 
   const safe = safeBounds();
@@ -366,7 +250,7 @@ function drawMat() {
 
   ctx.fillStyle = "#6c6f73";
   ctx.font = `${12 * (window.devicePixelRatio || 1)}px system-ui`;
-  ctx.fillText("A3 simple play mat", p1.x + 10, p1.y + 18);
+  ctx.fillText("A3 simple play mat #01 (Position ID)", p1.x + 10, p1.y + 18);
   ctx.fillText("safe drawing area", s1.x + 10, s1.y + 18);
   ctx.restore();
 }
@@ -442,7 +326,7 @@ function drawCubePath(points) {
 
 function drawCubePose(pose, color, alpha = 1, filled = false) {
   const center = matToCanvas(pose);
-  const size = 32 * getView().scale;
+  const size = 32 * 0.8 * getView().scale;
   const theta = degToRad(pose.theta || 0);
   ctx.save();
   ctx.translate(center.x, center.y);
@@ -584,6 +468,11 @@ async function runToio() {
     log("移動用と昇降用の toio を接続してください。");
     return;
   }
+  if (!moveCube.pose) {
+    log("移動用 toio の Position ID が未取得です。プレイマット上に置き、赤い実機toio表示が出てから実行してください。");
+    setPill(els.runStatus, "Position ID 未取得", "error");
+    return;
+  }
   running = true;
   abortRun = false;
   els.runBtn.disabled = true;
@@ -595,7 +484,18 @@ async function runToio() {
       if (command.type === "pen") {
         await setPen(command.state);
       } else if (command.type === "move" || command.type === "rotate") {
-        await moveCube.moveTo(command.x, command.y, command.theta, command.speed, config.targetTimeout);
+        if (!moveCube.pose) {
+          throw new Error("移動用 toio の Position ID を見失いました。マット上で再取得してから実行してください。");
+        }
+        const nativePoint = matToNativePoint(command);
+        if (!pointInBounds(nativePoint, MAT)) {
+          throw new Error(`toio 目標座標がマット外です: x=${nativePoint.x.toFixed(1)} y=${nativePoint.y.toFixed(1)}`);
+        }
+        log(
+          `toio ${command.type}: x=${nativePoint.x.toFixed(1)} y=${nativePoint.y.toFixed(1)} ` +
+            `θ=${command.theta.toFixed(0)} speed=${command.speed}`,
+        );
+        await moveCube.moveTo(nativePoint.x, nativePoint.y, command.theta, command.speed, config.targetTimeout);
       } else if (command.type === "wait") {
         await sleep(command.ms);
       }
@@ -615,9 +515,9 @@ async function runToio() {
 async function setPen(state) {
   if (!penCube) throw new Error("ペン昇降用 toio が未接続です。");
   if (state === "up") {
-    await penCube.timedMotor(config.upMotorSpeed, config.upDurationMs);
+    await penCube.timedMotor(config.upMotorSpeed, config.upDurationMs, config.penMotorMode);
   } else {
-    await penCube.timedMotor(config.downMotorSpeed, config.downDurationMs);
+    await penCube.timedMotor(config.downMotorSpeed, config.downDurationMs, config.penMotorMode);
   }
   await sleep(config.settleMs);
 }
@@ -713,6 +613,67 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function connectedName(cube) {
+  return cube?.device?.name || "未接続";
+}
+
+function setMoveCube(cube) {
+  moveCube = cube;
+  if (!cube) {
+    els.moveCubeState.textContent = "未接続";
+    els.positionState.textContent = "未取得";
+    return;
+  }
+  cube.role = "移動用";
+  cube.onStatus = (status) => {
+    els.moveCubeState.textContent = status;
+  };
+  cube.onPose = (pose) => {
+    const matPose = nativeToMatPose(pose);
+    els.positionState.textContent = `x:${matPose.x.toFixed(1)} y:${matPose.y.toFixed(1)} θ:${pose.theta}`;
+    draw();
+  };
+  cube.onPositionMissed = () => {
+    cube.pose = null;
+    els.positionState.textContent = "Position ID missed";
+    draw();
+  };
+  cube.onLog = log;
+  els.moveCubeState.textContent = connectedName(cube);
+  if (cube.pose) {
+    const matPose = nativeToMatPose(cube.pose);
+    els.positionState.textContent = `x:${matPose.x.toFixed(1)} y:${matPose.y.toFixed(1)} θ:${matPose.theta}`;
+  }
+}
+
+function setPenCube(cube) {
+  penCube = cube;
+  if (!cube) {
+    els.penCubeState.textContent = "未接続";
+    return;
+  }
+  cube.role = "昇降用";
+  cube.onStatus = (status) => {
+    els.penCubeState.textContent = status;
+  };
+  cube.onPose = () => {};
+  cube.onPositionMissed = () => {};
+  cube.onLog = log;
+  els.penCubeState.textContent = connectedName(cube);
+}
+
+function swapCubeRoles() {
+  if (!moveCube || !penCube) {
+    log("役割入替には移動用と昇降用の両方を接続してください。");
+    return;
+  }
+  const oldMove = moveCube;
+  setMoveCube(penCube);
+  setPenCube(oldMove);
+  log("移動用と昇降用の役割を入れ替えました。");
+  draw();
+}
+
 function bindEvents() {
   els.canvas.addEventListener("pointerdown", pointerDown);
   els.canvas.addEventListener("pointermove", pointerMove);
@@ -747,21 +708,28 @@ function bindEvents() {
   els.penDownBtn.addEventListener("click", () => setPen("down").then(() => log("Pen down")).catch((error) => log(error.message)));
 
   els.connectMoveBtn.addEventListener("click", async () => {
+    let cube = null;
     try {
-      moveCube = new ToioCube("移動用", els.moveCubeState);
-      await moveCube.connect();
+      cube = new ToioCube("移動用", { onLog: log });
+      setMoveCube(cube);
+      await cube.connect();
     } catch (error) {
+      if (cube && !cube.device) setMoveCube(null);
       log(error.message);
     }
   });
   els.connectPenBtn.addEventListener("click", async () => {
+    let cube = null;
     try {
-      penCube = new ToioCube("昇降用", els.penCubeState);
-      await penCube.connect();
+      cube = new ToioCube("昇降用", { onLog: log });
+      setPenCube(cube);
+      await cube.connect();
     } catch (error) {
+      if (cube && !cube.device) setPenCube(null);
       log(error.message);
     }
   });
+  els.swapRolesBtn.addEventListener("click", swapCubeRoles);
 
   for (const input of Object.values(configInputs)) {
     input.addEventListener("input", readConfigFromForm);

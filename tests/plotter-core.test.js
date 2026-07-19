@@ -23,8 +23,8 @@ function simulate(stroke, config = {}) {
 
 test("pen front/back offset changes simulated cube path", () => {
   const stroke = makeStroke([
-    [120, 120],
-    [180, 120],
+    [190, 250],
+    [250, 250],
   ]);
   const backPen = simulate(stroke, { penOffsetX: -48, penOffsetY: 0 });
   const centeredPen = simulate(stroke, { penOffsetX: 0, penOffsetY: 0 });
@@ -35,8 +35,8 @@ test("pen front/back offset changes simulated cube path", () => {
 
 test("pen left/right offset changes simulated cube path sideways", () => {
   const stroke = makeStroke([
-    [120, 120],
-    [180, 120],
+    [190, 250],
+    [250, 250],
   ]);
   const noSideOffset = simulate(stroke, { penOffsetY: 0 });
   const sideOffset = simulate(stroke, { penOffsetY: 30 });
@@ -46,12 +46,12 @@ test("pen left/right offset changes simulated cube path sideways", () => {
 
 test("higher line tolerance reduces draw segments and pen up/down count", () => {
   const stroke = makeStroke([
-    [80, 110],
-    [100, 112],
-    [120, 109],
-    [140, 113],
-    [160, 111],
-    [180, 112],
+    [170, 250],
+    [190, 252],
+    [210, 249],
+    [230, 253],
+    [250, 251],
+    [270, 252],
   ]);
   const strict = simulate(stroke, { lineTolerance: 0, minSegmentLength: 0 });
   const corrected = simulate(stroke, { lineTolerance: 12, minSegmentLength: 0 });
@@ -63,11 +63,11 @@ test("higher line tolerance reduces draw segments and pen up/down count", () => 
 
 test("corner preservation keeps an L shape as two draw segments", () => {
   const stroke = makeStroke([
-    [120, 120],
-    [150, 120],
-    [180, 120],
-    [180, 150],
-    [180, 180],
+    [190, 220],
+    [220, 220],
+    [250, 220],
+    [250, 250],
+    [250, 280],
   ]);
   const result = simulate(stroke, { lineTolerance: 40, cornerAngle: 45, minSegmentLength: 0 });
 
@@ -76,8 +76,8 @@ test("corner preservation keeps an L shape as two draw segments", () => {
 
 test("safe area setting affects simulation errors", () => {
   const stroke = makeStroke([
-    [60, 60],
-    [90, 60],
+    [112, 152],
+    [142, 152],
   ]);
   const smallSafeArea = simulate(stroke, { safeScale: 0.5 });
   const fullSafeArea = simulate(stroke, { safeScale: 1 });
@@ -88,8 +88,8 @@ test("safe area setting affects simulation errors", () => {
 
 test("draw and travel speed settings are reflected in commands", () => {
   const stroke = makeStroke([
-    [120, 120],
-    [180, 120],
+    [190, 250],
+    [250, 250],
   ]);
   const result = simulate(stroke, { drawSpeed: 22, travelSpeed: 77 });
   const drawMove = result.commands.find((command) => command.type === "move" && command.speed === 22);
@@ -97,4 +97,23 @@ test("draw and travel speed settings are reflected in commands", () => {
 
   assert.ok(drawMove);
   assert.ok(travelMove);
+});
+
+test("native Position ID center is used directly as the play mat coordinate system", () => {
+  const nativeCenter = {
+    x: (core.NATIVE_MAT.minX + core.NATIVE_MAT.maxX) / 2,
+    y: (core.NATIVE_MAT.minY + core.NATIVE_MAT.maxY) / 2,
+  };
+  const matCenter = core.nativeToMatPoint(nativeCenter);
+
+  assert.deepEqual(matCenter, nativeCenter);
+});
+
+test("mat coordinates round-trip through native Position ID coordinates", () => {
+  const matPoint = { x: 250, y: 250 };
+  const nativePoint = core.matToNativePoint(matPoint);
+  const result = core.nativeToMatPoint(nativePoint);
+
+  assert.ok(Math.abs(result.x - matPoint.x) < 0.001);
+  assert.ok(Math.abs(result.y - matPoint.y) < 0.001);
 });

@@ -8,14 +8,16 @@
   "use strict";
 
   const MAT = {
-    minX: 34,
-    minY: 35,
-    maxX: 339,
-    maxY: 250,
+    minX: 98,
+    minY: 142,
+    maxX: 402,
+    maxY: 358,
   };
 
+  const NATIVE_MAT = { ...MAT };
+
   const DEFAULT_CONFIG = {
-    configVersion: 2,
+    configVersion: 3,
     safeScale: 0.75,
     fixedHeading: 0,
     penOffsetX: -48,
@@ -31,10 +33,11 @@
     lineTolerance: 10,
     minSegmentLength: 12,
     targetTimeout: 6,
-    upMotorSpeed: 50,
+    upMotorSpeed: -50,
     upDurationMs: 300,
-    downMotorSpeed: -50,
+    downMotorSpeed: 50,
     downDurationMs: 300,
+    penMotorMode: 0,
     settleMs: 250,
   };
 
@@ -54,6 +57,28 @@
       minY: centerY - halfH,
       maxY: centerY + halfH,
     };
+  }
+
+  function nativeToMatPoint(point) {
+    return {
+      x: point.x,
+      y: point.y,
+    };
+  }
+
+  function matToNativePoint(point) {
+    return {
+      x: point.x,
+      y: point.y,
+    };
+  }
+
+  function nativeToMatPose(pose) {
+    return { ...pose, ...nativeToMatPoint(pose) };
+  }
+
+  function matToNativePose(pose) {
+    return { ...pose, ...matToNativePoint(pose) };
   }
 
   function processStroke(raw, configInput = {}) {
@@ -105,7 +130,7 @@
           if (!pointInBounds(point, bounds)) errors.push(`安全領域外の点があります: x=${point.x.toFixed(1)} y=${point.y.toFixed(1)}`);
         }
         for (const cube of [startCube, endCube]) {
-          if (!pointInBounds(cube, MAT)) warnings.push("toio 本体の目標座標がマット外に出る可能性があります。");
+          if (!pointInBounds(cube, MAT)) errors.push(`toio 本体の目標座標がマット外です: x=${cube.x.toFixed(1)} y=${cube.y.toFixed(1)}`);
         }
 
         commands.push({ type: "rotate", x: startCube.x, y: startCube.y, theta, speed: config.travelSpeed, penX: start.x, penY: start.y });
@@ -286,9 +311,14 @@
 
   return {
     MAT,
+    NATIVE_MAT,
     DEFAULT_CONFIG,
     withDefaults,
     safeBounds,
+    nativeToMatPoint,
+    matToNativePoint,
+    nativeToMatPose,
+    matToNativePose,
     processStroke,
     createSimulation,
     penToCube,
