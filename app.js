@@ -11,6 +11,8 @@ const COLORS = {
   penDownEvent: "#16a34a",
   cubePath: "#2563eb",
   cubeGhost: "#7c3aed",
+  cubeStart: "#16a34a",
+  cubeEnd: "#7c3aed",
   liveCube: "#bd2f2f",
 };
 
@@ -18,6 +20,9 @@ const PLAY_MAT_IMAGE_SRC = "image/playmat-position-id-01.png";
 const POSITION_FRESH_MS = 500;
 const POSITION_HOLD_MS = 1500;
 const POSITION_RUN_TIMEOUT_MS = 1000;
+const POSITION_RETRY_WAIT_MS = 3000;
+const POSITION_RETRY_POLL_MS = 100;
+const POSITION_TARGET_RETRY_COUNT = 1;
 
 const els = {
   canvas: document.getElementById("plotCanvas"),
@@ -344,8 +349,10 @@ function drawCubePath(points) {
   for (let i = 0; i < points.length; i += stride) {
     drawCubePose(points[i], COLORS.cubeGhost, 0.36, false);
   }
-  drawCubePose(points[0], COLORS.cubeGhost, 0.8, false);
-  drawCubePose(points[points.length - 1], COLORS.cubeGhost, 0.9, true);
+  drawCubePose(points[0], COLORS.cubeStart, 0.95, true);
+  drawCubeLabel(points[0], "START", COLORS.cubeStart, -1);
+  drawCubePose(points[points.length - 1], COLORS.cubeEnd, 0.95, true);
+  drawCubeLabel(points[points.length - 1], "END", COLORS.cubeEnd, 1);
 }
 
 function drawCubePose(pose, color, alpha = 1, filled = false) {
@@ -369,6 +376,28 @@ function drawCubePose(pose, color, alpha = 1, filled = false) {
   ctx.moveTo(0, 0);
   ctx.lineTo(size / 2, 0);
   ctx.stroke();
+  ctx.restore();
+}
+
+function drawCubeLabel(pose, label, color, side = 1) {
+  const dpr = window.devicePixelRatio || 1;
+  const point = matToCanvas(pose);
+  ctx.save();
+  ctx.font = `bold ${10 * dpr}px system-ui`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const textWidth = ctx.measureText(label).width;
+  const padX = 5 * dpr;
+  const width = textWidth + padX * 2;
+  const height = 16 * dpr;
+  const y = point.y + side * 24 * dpr;
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1 * dpr;
+  ctx.fillRect(point.x - width / 2, y - height / 2, width, height);
+  ctx.strokeRect(point.x - width / 2, y - height / 2, width, height);
+  ctx.fillStyle = color;
+  ctx.fillText(label, point.x, y);
   ctx.restore();
 }
 
@@ -401,7 +430,8 @@ function drawLegend() {
     ["pen up 移動", COLORS.penTravel, "dash"],
     ["pen down/up", COLORS.penDownEvent, "event"],
     ["toio移動軌跡", COLORS.cubePath, "dash"],
-    ["toio姿勢", COLORS.cubeGhost, "box"],
+    ["toio開始", COLORS.cubeStart, "box"],
+    ["toio終了", COLORS.cubeEnd, "box"],
     ["実機toio", COLORS.liveCube, "box"],
   ];
   const x = 18 * dpr;
@@ -506,20 +536,16 @@ async function runToio() {
     for (const command of simulation.commands) {
       if (abortRun) throw new Error("Emergency stop");
       if (command.type === "pen") {
+        if (command.state === "down") {
+          await ensureFreshPositionOrRetry("pen down 前");
+        }
         await setPen(command.state);
       } else if (command.type === "move" || command.type === "rotate") {
-        if (!hasFreshMovePose(POSITION_RUN_TIMEOUT_MS)) {
-          throw new Error("移動用 toio の Position ID を見失いました。マット上で再取得してから実行してください。");
-        }
         const nativePoint = matToNativePoint(command);
         if (!pointInBounds(nativePoint, MAT)) {
           throw new Error(`toio 目標座標がマット外です: x=${nativePoint.x.toFixed(1)} y=${nativePoint.y.toFixed(1)}`);
         }
-        log(
-          `toio ${command.type}: x=${nativePoint.x.toFixed(1)} y=${nativePoint.y.toFixed(1)} ` +
-            `θ=${command.theta.toFixed(0)} speed=${command.speed}`,
-        );
-        await moveCube.moveTo(nativePoint.x, nativePoint.y, command.theta, command.speed, config.targetTimeout);
+        await runMoveCommandWithPositionRetry(command, nativePoint);
       } else if (command.type === "wait") {
         await sleep(command.ms);
       }
@@ -544,6 +570,52 @@ async function setPen(state) {
     await penCube.timedMotor(config.downMotorSpeed, config.downDurationMs, config.penMotorMode);
   }
   await sleep(config.settleMs);
+}
+
+async function runMoveCommandWithPositionRetry(command, nativePoint) {
+  for (let attempt = 0; attempt <= POSITION_TARGET_RETRY_COUNT; attempt += 1) {
+    if (attempt > 0) log(`Position ID retry: ${attempt}/${POSITION_TARGET_RETRY_COUNT}`);
+    log(
+      `toio ${command.type}: x=${nativePoint.x.toFixed(1)} y=${nativePoint.y.toFixed(1)} ` +
+        `θ=${command.theta.toFixed(0)} speed=${command.speed}`,
+    );
+    try {
+      await moveCube.moveTo(nativePoint.x, nativePoint.y, command.theta, command.speed, config.targetTimeout);
+      return;
+    } catch (error) {
+      if (attempt >= POSITION_TARGET_RETRY_COUNT || !isPositionRetryableError(error)) throw error;
+      log(`Position ID retry: ${error.message}`);
+      await recoverPositionForRetry();
+    }
+  }
+}
+
+async function ensureFreshPositionOrRetry(context) {
+  if (hasFreshMovePose(POSITION_RUN_TIMEOUT_MS)) return;
+  log(`Position ID retry: ${context}にPosition IDを見失いました。ペンを上げて停止します。`);
+  await recoverPositionForRetry();
+}
+
+async function recoverPositionForRetry() {
+  await setPen("up");
+  await moveCube?.stop();
+  log("Position ID retry: 再取得を待っています...");
+  const recovered = await waitForFreshMovePose(POSITION_RETRY_WAIT_MS);
+  if (!recovered) throw new Error("移動用 toio の Position ID を再取得できませんでした。");
+  log("Position ID retry: 再取得しました。");
+}
+
+async function waitForFreshMovePose(timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start <= timeoutMs) {
+    if (hasFreshMovePose(POSITION_FRESH_MS)) return true;
+    await sleep(POSITION_RETRY_POLL_MS);
+  }
+  return false;
+}
+
+function isPositionRetryableError(error) {
+  return String(error?.message || "").includes("0x02");
 }
 
 async function emergencyStop() {
