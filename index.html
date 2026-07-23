@@ -29,6 +29,17 @@
       <aside class="control-panel" aria-label="操作パネル">
         <section class="panel-section">
           <h2>描画</h2>
+          <div class="sample-row">
+            <select id="sampleSelect" aria-label="サンプル図形">
+              <option value="">サンプルを選択</option>
+              <option value="samples/json/line-1.json">直線1本</option>
+              <option value="samples/json/line-2.json">直線2本</option>
+              <option value="samples/json/triangle.json">三角</option>
+              <option value="samples/json/square.json">四角</option>
+              <option value="samples/json/star.json">星形</option>
+            </select>
+            <button id="loadSampleBtn" type="button">Load</button>
+          </div>
           <div class="button-grid">
             <button id="undoBtn" type="button">Undo</button>
             <button id="clearBtn" type="button">Clear</button>

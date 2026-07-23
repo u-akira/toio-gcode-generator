@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "name": "line-1",
+  "mat": { "minX": 98, "minY": 142, "maxX": 402, "maxY": 358 },
+  "strokes": [
+    { "raw": [{ "x": 180, "y": 250 }, { "x": 320, "y": 250 }] }
+  ]
+}

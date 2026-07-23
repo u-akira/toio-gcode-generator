@@ -36,6 +36,8 @@ const els = {
   clearBtn: document.getElementById("clearBtn"),
   exportBtn: document.getElementById("exportBtn"),
   importInput: document.getElementById("importInput"),
+  sampleSelect: document.getElementById("sampleSelect"),
+  loadSampleBtn: document.getElementById("loadSampleBtn"),
   connectMoveBtn: document.getElementById("connectMoveBtn"),
   connectPenBtn: document.getElementById("connectPenBtn"),
   swapRolesBtn: document.getElementById("swapRolesBtn"),
@@ -643,7 +645,10 @@ function exportDrawing() {
 
 async function importDrawing(file) {
   const text = await file.text();
-  const payload = JSON.parse(text);
+  importDrawingPayload(JSON.parse(text), "描画 JSON を読み込みました");
+}
+
+function importDrawingPayload(payload, reason) {
   strokes = Array.isArray(payload.strokes) ? payload.strokes : [];
   if (payload.config) {
     config = { ...config, ...payload.config };
@@ -651,8 +656,20 @@ async function importDrawing(file) {
     saveConfig();
   }
   simulation = null;
-  invalidateSimulation("描画 JSON を読み込みました");
+  invalidateSimulation(reason);
   draw();
+}
+
+async function loadSelectedSample() {
+  const src = els.sampleSelect.value;
+  if (!src) {
+    log("サンプル図形を選択してください。");
+    return;
+  }
+  const response = await fetch(src);
+  if (!response.ok) throw new Error(`Sample load failed: ${response.status} ${response.statusText}`);
+  const payload = await response.json();
+  importDrawingPayload(payload, `サンプルを読み込みました: ${els.sampleSelect.options[els.sampleSelect.selectedIndex].text}`);
 }
 
 function pointerDown(event) {
@@ -833,6 +850,10 @@ function bindEvents() {
     const [file] = event.target.files;
     if (file) importDrawing(file).catch((error) => log(`Import failed: ${error.message}`));
     event.target.value = "";
+  });
+  els.loadSampleBtn.addEventListener("click", () => loadSelectedSample().catch((error) => log(error.message)));
+  els.sampleSelect.addEventListener("change", () => {
+    if (els.sampleSelect.value) loadSelectedSample().catch((error) => log(error.message));
   });
 
   els.simulateBtn.addEventListener("click", runSimulation);
