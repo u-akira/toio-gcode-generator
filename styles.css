@@ -184,6 +184,48 @@ h2 {
   pointer-events: none;
 }
 
+.legend-toggle {
+  position: absolute;
+  top: 30px;
+  right: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 178px;
+  min-height: 30px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--ink);
+  border-color: var(--line);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  z-index: 1;
+}
+
+.legend-toggle::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 120ms ease;
+}
+
+.legend-toggle[aria-expanded="true"] {
+  color: var(--ink);
+}
+
+.legend-toggle[aria-expanded="false"] {
+  color: var(--muted);
+}
+
+.legend-toggle[aria-expanded="false"]::after {
+  transform: translateY(2px) rotate(-135deg);
+}
+
 .control-panel {
   overflow: auto;
   max-height: 100vh;

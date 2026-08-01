@@ -46,6 +46,7 @@ const els = {
   stopBtn: document.getElementById("stopBtn"),
   penUpBtn: document.getElementById("penUpBtn"),
   penDownBtn: document.getElementById("penDownBtn"),
+  legendToggleBtn: document.getElementById("legendToggleBtn"),
 };
 
 const configInputs = [
@@ -89,6 +90,7 @@ let playMatImageLoaded = false;
 let lastMovePose = null;
 let lastMovePoseAt = 0;
 let lastMovePoseState = "missed";
+let legendVisible = localStorage.getItem("toioPlotterLegendVisible") !== "false";
 
 const playMatImage = new Image();
 playMatImage.onload = () => {
@@ -255,7 +257,18 @@ function draw() {
   if (poseStatus.pose && poseStatus.state !== "missed") {
     drawCubePose(nativeToMatPose(poseStatus.pose), COLORS.liveCube, poseStatus.state === "unstable" ? 0.42 : 1, true);
   }
-  drawLegend();
+  if (legendVisible) drawLegend();
+}
+
+function syncLegendToggle() {
+  els.legendToggleBtn.setAttribute("aria-expanded", String(legendVisible));
+}
+
+function toggleLegend() {
+  legendVisible = !legendVisible;
+  localStorage.setItem("toioPlotterLegendVisible", String(legendVisible));
+  syncLegendToggle();
+  draw();
 }
 
 function drawMat() {
@@ -436,8 +449,8 @@ function drawLegend() {
     ["toio終了", COLORS.cubeEnd, "box"],
     ["実機toio", COLORS.liveCube, "box"],
   ];
-  const x = 18 * dpr;
-  const y = 18 * dpr;
+  const x = els.canvas.width - 196 * dpr;
+  const y = 50 * dpr;
   const lineH = 20 * dpr;
   const width = 178 * dpr;
   const height = (items.length * lineH + 12 * dpr);
@@ -831,6 +844,7 @@ function bindEvents() {
   els.canvas.addEventListener("pointerup", pointerUp);
   els.canvas.addEventListener("pointercancel", pointerUp);
   window.addEventListener("resize", resizeCanvasBackingStore);
+  els.legendToggleBtn.addEventListener("click", toggleLegend);
 
   els.undoBtn.addEventListener("click", () => {
     strokes.pop();
@@ -894,6 +908,7 @@ function bindEvents() {
 
 function init() {
   syncConfigToForm();
+  syncLegendToggle();
   bindEvents();
   window.setInterval(refreshMovePoseStatus, 250);
   resizeCanvasBackingStore();
