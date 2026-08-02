@@ -23,6 +23,7 @@ const POSITION_RUN_TIMEOUT_MS = 1000;
 const POSITION_RETRY_WAIT_MS = 3000;
 const POSITION_RETRY_POLL_MS = 100;
 const POSITION_TARGET_RETRY_COUNT = 1;
+const POSITION_UI_REFRESH_MS = 300;
 
 const els = {
   canvas: document.getElementById("plotCanvas"),
@@ -90,6 +91,8 @@ let playMatImageLoaded = false;
 let lastMovePose = null;
 let lastMovePoseAt = 0;
 let lastMovePoseState = "missed";
+let lastMovePoseUiAt = 0;
+let movePoseUiTimer = null;
 let legendVisible = localStorage.getItem("toioPlotterLegendVisible") !== "false";
 
 const playMatImage = new Image();
@@ -555,6 +558,7 @@ async function runToio() {
           await ensureFreshPositionOrRetry("pen down 前");
         }
         await setPen(command.state);
+        await ensureFreshPositionAfterPen(command.state, Date.now());
       } else if (command.type === "move" || command.type === "rotate") {
         const nativePoint = matToNativePoint(command);
         if (!pointInBounds(nativePoint, MAT)) {
@@ -611,6 +615,13 @@ async function ensureFreshPositionOrRetry(context) {
   await recoverPositionForRetry();
 }
 
+async function ensureFreshPositionAfterPen(state, sinceMs) {
+  const recovered = await waitForFreshMovePoseAfter(sinceMs, POSITION_RUN_TIMEOUT_MS);
+  if (recovered) return;
+  log(`Position ID retry: pen ${state} aftershock, waiting for stable Position ID.`);
+  await recoverPositionForRetry();
+}
+
 async function recoverPositionForRetry() {
   await setPen("up");
   await moveCube?.stop();
@@ -624,6 +635,15 @@ async function waitForFreshMovePose(timeoutMs) {
   const start = Date.now();
   while (Date.now() - start <= timeoutMs) {
     if (hasFreshMovePose(POSITION_FRESH_MS)) return true;
+    await sleep(POSITION_RETRY_POLL_MS);
+  }
+  return false;
+}
+
+async function waitForFreshMovePoseAfter(sinceMs, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start <= timeoutMs) {
+    if (lastMovePoseAt >= sinceMs && hasFreshMovePose(POSITION_FRESH_MS)) return true;
     await sleep(POSITION_RETRY_POLL_MS);
   }
   return false;
@@ -767,13 +787,35 @@ function updateMovePoseText(status = getMovePoseStatus()) {
   }
 }
 
+function updateMovePoseUi({ force = false } = {}) {
+  const now = Date.now();
+  const elapsed = now - lastMovePoseUiAt;
+  const apply = () => {
+    if (movePoseUiTimer) {
+      window.clearTimeout(movePoseUiTimer);
+      movePoseUiTimer = null;
+    }
+    lastMovePoseUiAt = Date.now();
+    updateMovePoseText();
+    draw();
+  };
+
+  if (force || elapsed >= POSITION_UI_REFRESH_MS) {
+    apply();
+    return;
+  }
+
+  if (!movePoseUiTimer) {
+    movePoseUiTimer = window.setTimeout(() => apply(), POSITION_UI_REFRESH_MS - elapsed);
+  }
+}
+
 function refreshMovePoseStatus() {
   if (!moveCube || !lastMovePose) return;
   const previous = lastMovePoseState;
   const status = getMovePoseStatus();
   if (status.state !== previous) {
-    updateMovePoseText(status);
-    draw();
+    updateMovePoseUi({ force: true });
   }
 }
 
@@ -783,6 +825,11 @@ function setMoveCube(cube) {
     lastMovePose = null;
     lastMovePoseAt = 0;
     lastMovePoseState = "missed";
+    lastMovePoseUiAt = 0;
+    if (movePoseUiTimer) {
+      window.clearTimeout(movePoseUiTimer);
+      movePoseUiTimer = null;
+    }
     els.moveCubeState.textContent = "未接続";
     els.positionState.textContent = "未取得";
     return;
@@ -794,19 +841,17 @@ function setMoveCube(cube) {
   cube.onPose = (pose) => {
     lastMovePose = pose;
     lastMovePoseAt = Date.now();
-    updateMovePoseText({ state: "fresh", pose, ageMs: 0 });
-    draw();
+    updateMovePoseUi();
   };
   cube.onPositionMissed = () => {
-    updateMovePoseText();
-    draw();
+    updateMovePoseUi();
   };
   cube.onLog = log;
   els.moveCubeState.textContent = connectedName(cube);
   if (cube.pose) {
     lastMovePose = cube.pose;
     lastMovePoseAt = Date.now();
-    updateMovePoseText({ state: "fresh", pose: cube.pose, ageMs: 0 });
+    updateMovePoseUi({ force: true });
   }
 }
 
@@ -910,7 +955,7 @@ function init() {
   syncConfigToForm();
   syncLegendToggle();
   bindEvents();
-  window.setInterval(refreshMovePoseStatus, 250);
+  window.setInterval(refreshMovePoseStatus, POSITION_UI_REFRESH_MS);
   resizeCanvasBackingStore();
   setPill(els.simStatus, "未シミュレーション", "warn");
   log("準備完了。フリーハンドで描画してください。");
