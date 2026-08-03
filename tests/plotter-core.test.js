@@ -7,9 +7,8 @@ function makeStroke(points) {
 }
 
 function simulate(stroke, config = {}) {
-  return core.createSimulation({
-    strokes: [stroke],
-    config: core.withDefaults({
+  return new core.PositionIdPlanner(
+    core.withDefaults({
       smoothing: 0,
       minPointDistance: 1,
       cornerAngle: 60,
@@ -18,7 +17,7 @@ function simulate(stroke, config = {}) {
       minSegmentLength: 0,
       ...config,
     }),
-  });
+  ).plan([stroke]);
 }
 
 test("pen front/back offset changes simulated cube path", () => {
@@ -116,4 +115,97 @@ test("mat coordinates round-trip through native Position ID coordinates", () => 
 
   assert.ok(Math.abs(result.x - matPoint.x) < 0.001);
   assert.ok(Math.abs(result.y - matPoint.y) < 0.001);
+});
+
+test("dead reckoning simulation creates draw segments and motor commands", () => {
+  const stroke = makeStroke([
+    [190, 250],
+    [250, 250],
+  ]);
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0 })).plan([stroke]);
+
+  assert.equal(result.mode, "dead");
+  assert.equal(result.segments.length, 1);
+  assert.equal(result.segments[0].kind, "draw");
+  assert.equal(result.segments[0].lengthMm, 60);
+  assert.ok(result.commands.some((command) => command.type === "motor"));
+});
+
+test("dead reckoning motor commands include cube start and end centers", () => {
+  const stroke = makeStroke([
+    [190, 250],
+    [250, 250],
+  ]);
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: -48, penOffsetY: 0 })).plan([stroke]);
+  const segment = result.segments[0];
+  const motor = result.commands.find((command) => command.type === "motor" && command.kind === "draw");
+
+  assert.ok(motor);
+  assert.equal(motor.fromX, segment.startCube.x);
+  assert.equal(motor.fromY, segment.startCube.y);
+  assert.equal(motor.x, segment.endCube.x);
+  assert.equal(motor.y, segment.endCube.y);
+});
+
+test("dead reckoning inserts travel between separate strokes", () => {
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0 })).plan([
+      makeStroke([
+        [10, 10],
+        [60, 10],
+      ]),
+      makeStroke([
+        [80, 40],
+        [120, 40],
+      ]),
+    ]);
+
+  assert.equal(result.stats.drawSegments, 2);
+  assert.ok(result.stats.travelSegments >= 1);
+  assert.equal(result.segments[1].kind, "travel");
+});
+
+test("dead reckoning changes draw direction with motor-only transition steps", () => {
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: -48, penOffsetY: 0 })).plan([
+    makeStroke([
+      [190, 250],
+      [250, 250],
+      [250, 310],
+    ]),
+  ]);
+  const first = result.segments[0];
+  const second = result.segments[1];
+  const transitionMotor = result.commands.find((command) => command.role === "transition-travel");
+  const turnToTravel = result.commands.find((command) => command.role === "turn-to-travel");
+  const turnToDraw = result.commands.find((command) => command.role === "turn-to-draw");
+
+  assert.ok(turnToTravel);
+  assert.ok(transitionMotor);
+  assert.ok(turnToDraw);
+  assert.equal(turnToTravel.x, first.endCube.x);
+  assert.equal(turnToTravel.y, first.endCube.y);
+  assert.equal(transitionMotor.x, second.startCube.x);
+  assert.equal(transitionMotor.y, second.startCube.y);
+  assert.equal(turnToDraw.x, second.startCube.x);
+  assert.equal(turnToDraw.y, second.startCube.y);
+  assert.equal(result.commands.some((command) => command.type === "align"), false);
+});
+
+test("signed angle delta returns the shortest turn", () => {
+  assert.equal(core.signedAngleDelta(350, 10), 20);
+  assert.equal(core.signedAngleDelta(10, 350), -20);
+});
+
+test("legacy simulation functions delegate to mode planners", () => {
+  const stroke = makeStroke([
+    [190, 250],
+    [250, 250],
+  ]);
+  const config = core.withDefaults({ smoothing: 0, lineCorrection: 0 });
+  const position = core.createSimulation({ strokes: [stroke], config });
+  const positionPlanner = new core.PositionIdPlanner(config).plan([stroke]);
+  const dead = core.createDeadReckoningSimulation({ strokes: [stroke], config });
+  const deadPlanner = new core.DeadReckoningPlanner(config).plan([stroke]);
+
+  assert.deepEqual(position.commands, positionPlanner.commands);
+  assert.deepEqual(dead.commands, deadPlanner.commands);
 });

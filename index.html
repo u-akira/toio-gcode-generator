@@ -70,12 +70,36 @@
 
         <section class="panel-section">
           <h2>実行</h2>
+          <div class="form-grid mode-grid">
+            <label>実行モード
+              <select id="runMode">
+                <option value="position">Position ID</option>
+                <option value="dead">Dead reckoning</option>
+              </select>
+            </label>
+          </div>
           <div class="button-grid">
             <button id="simulateBtn" type="button" class="primary">Simulate</button>
             <button id="runBtn" type="button" disabled>Run toio</button>
             <button id="stopBtn" type="button" class="danger">Emergency Stop</button>
             <button id="penUpBtn" type="button">Pen Up</button>
             <button id="penDownBtn" type="button">Pen Down</button>
+          </div>
+          <div class="selected-segment-panel">
+            <div class="selected-segment-header">
+              <h3>選択線分調整</h3>
+              <div class="segment-nav">
+                <button id="prevSegmentBtn" type="button">前へ</button>
+                <button id="nextSegmentBtn" type="button">次へ</button>
+              </div>
+            </div>
+            <div id="deadSegmentsEditor" class="segment-editor"></div>
+          </div>
+          <div class="toio-command-panel">
+            <div class="selected-segment-header">
+              <h3>toioコマンド</h3>
+            </div>
+            <pre id="toioCommandOutput" class="toio-command-output"></pre>
           </div>
           <div id="messageLog" class="message-log" role="status" aria-live="polite"></div>
         </section>
@@ -91,6 +115,10 @@
             <label>回転中心 Y<input id="rotationCenterOffsetY" type="number" step="1" /></label>
             <label>描画速度<input id="drawSpeed" type="number" min="10" max="255" step="1" /></label>
             <label>移動速度<input id="travelSpeed" type="number" min="10" max="255" step="1" /></label>
+            <label>回転速度<input id="deadTurnSpeed" type="number" min="10" max="255" step="1" /></label>
+            <label>回転補正<input id="deadTurnBalanceTrim" type="number" min="-80" max="80" step="1" /></label>
+            <label>描画 mm/s<input id="deadMmPerSecAtDrawSpeed" type="number" min="1" max="200" step="1" /></label>
+            <label>移動 mm/s<input id="deadMmPerSecAtTravelSpeed" type="number" min="1" max="200" step="1" /></label>
             <label>平滑化<input id="smoothing" type="number" min="0" max="1" step="0.05" /></label>
             <label>点間隔<input id="minPointDistance" type="number" min="1" max="30" step="1" /></label>
             <label>角検出 °<input id="cornerAngle" type="number" min="10" max="120" step="1" /></label>

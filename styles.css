@@ -296,6 +296,124 @@ h2 {
   color: var(--ink);
 }
 
+.form-grid select {
+  width: 100%;
+  border: 1px solid #c9c2b6;
+  border-radius: 6px;
+  min-height: 32px;
+  padding: 5px 7px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.mode-grid {
+  margin-bottom: 8px;
+}
+
+.selected-segment-panel {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.selected-segment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.selected-segment-header h3 {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.segment-nav {
+  display: flex;
+  gap: 6px;
+}
+
+.segment-nav button {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.segment-editor {
+  display: block;
+}
+
+.segment-card {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfaf7;
+}
+
+.segment-empty {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.segment-meta {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.segment-title {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.segment-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.segment-card label {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.segment-card input {
+  width: 100%;
+  border: 1px solid #c9c2b6;
+  border-radius: 5px;
+  min-height: 28px;
+  padding: 4px 6px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.toio-command-panel {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.toio-command-output {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfaf7;
+  color: #43464a;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .mini-log {
   display: grid;
   gap: 5px;

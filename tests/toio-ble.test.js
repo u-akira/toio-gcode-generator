@@ -26,6 +26,10 @@ test("buildTimedMotorCommand supports backward pen-up travel", () => {
   assert.deepEqual([...toio.buildTimedMotorCommand(-30, 300, 0)], [0x02, 0x01, 0x02, 30, 0x02, 0x02, 30, 30]);
 });
 
+test("buildTimedMotorPairCommand creates independent wheel speeds", () => {
+  assert.deepEqual([...toio.buildTimedMotorPairCommand(42, -37, 250)], [0x02, 0x01, 0x01, 42, 0x02, 0x02, 37, 25]);
+});
+
 test("buildTargetMoveCommand writes target fields little-endian", () => {
   const bytes = toio.buildTargetMoveCommand({
     id: 7,

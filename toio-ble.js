@@ -101,6 +101,10 @@
       await this.write(buildTimedMotorCommand(speed, durationMs, mode));
     }
 
+    async timedMotorPair(leftSpeed, rightSpeed, durationMs) {
+      await this.write(buildTimedMotorPairCommand(leftSpeed, rightSpeed, durationMs));
+    }
+
     async moveTo(x, y, theta, speed, timeoutSec) {
       const id = this.nextTargetId;
       this.nextTargetId = (this.nextTargetId + 1) & 0xff;
@@ -191,6 +195,15 @@
     return Uint8Array.from([0x02, 0x01, direction, amount, 0x02, rightDirection, amount, duration]);
   }
 
+  function buildTimedMotorPairCommand(leftSpeed, rightSpeed, durationMs) {
+    const duration = clamp(Math.round(durationMs / 10), 1, 255);
+    const leftDirection = leftSpeed >= 0 ? 0x01 : 0x02;
+    const rightDirection = rightSpeed >= 0 ? 0x01 : 0x02;
+    const leftAmount = clamp(Math.abs(Math.round(leftSpeed)), 0, 255);
+    const rightAmount = clamp(Math.abs(Math.round(rightSpeed)), 0, 255);
+    return Uint8Array.from([0x02, 0x01, leftDirection, leftAmount, 0x02, rightDirection, rightAmount, duration]);
+  }
+
   function oppositeDirection(direction) {
     return direction === 0x01 ? 0x02 : 0x01;
   }
@@ -228,6 +241,7 @@
     normalizeBluetoothError,
     buildStopCommand,
     buildTimedMotorCommand,
+    buildTimedMotorPairCommand,
     buildTargetMoveCommand,
   };
 });

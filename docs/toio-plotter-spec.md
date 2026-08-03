@@ -255,6 +255,121 @@ PC の Web Bluetooth 対応ブラウザを対象にする。
 - 線分ごとの速度調整
 - Position ID のライブ更新を使った閉ループ補正
 
+## Dead reckoning 実行モード
+
+Position ID 目標移動を使う既存モードとは別に、描画された図形を座標取得なしで描くための Dead reckoning モードを追加する。
+
+このモードの目的:
+
+- 描画された図形から、toio の左右モーター速度と駆動時間だけで描画するコマンド列を計算する。
+- ペン先は toio から離れているため、線分間の回転や向き合わせではペン先オフセットを考慮する。
+- toio の回転はモーター位置を中心とするため、単純にキューブ中心だけを回転中心とみなさない。
+- 座標は実行中に取得しないため、回転の向きと量も左右モーター速度と時間から計算する。
+- 計算結果はシミュレーション後に線分ごとに調整できるようにする。
+- 実行時は、計算済みのモーターコマンドだけを順番に送信する。
+
+### モード構成
+
+実行モードは以下を持つ。
+
+- `Position ID`: 既存の座標追従モード。Position ID 目標座標へ移動する。
+- `Dead reckoning`: 線分長と向きから timed motor command を生成して実行する。
+
+Dead reckoning は Position ID を一切使わない。ユーザーがペン先を図形の start 点に置き、toio 前方を最初の線分方向に合わせる。
+
+### 座標系と入力
+
+Dead reckoning では既存の描画座標をそのまま使い、線分長を mm 相当として扱う。
+
+- 入力 JSON/SVG の 1 座標単位は、A3 サイズから大きく乖離していない限り `1mm` 相当として扱う。
+- 既存の JSON/SVG サンプルは利用できる。
+- Dead reckoning は読み込んだ図形の中央揃え、拡大縮小、用紙内フィットを行わない。
+- Position ID モードと Dead reckoning モードで、描画データの表示位置は一致させる。
+- 実行順、start、end は入力データの stroke 順と点順をそのまま採用する。自動最短経路化は初期版では行わない。
+
+### 移動計画
+
+Dead reckoning の移動計画は、描画 stroke を直線線分の列として扱う。
+
+- 線分ごとに `pen up -> 回転 -> pen down -> 直進描画 -> pen up` を基本動作とする。
+- 離れた stroke または離れた線分開始点へ移動する場合は、pen-up の travel 線分として `回転 -> 直進移動` を計画に含める。
+- 回転中は必ず pen up とし、ペン先オフセットによる不要な弧を描かない。
+- 曲線やフリーハンド stroke は、既存の平滑化と直線補正後の短い直線列として扱う。
+
+### ペン先オフセットとシミュレーション
+
+Dead reckoning シミュレーションは、toio とペン先を剛体として扱う理想モデルにする。
+
+- 既存の `penOffsetX` / `penOffsetY` を Dead reckoning でも使う。
+- `rotationCenterOffsetX` / `rotationCenterOffsetY` を反映し、回転時のペン先移動をシミュレーションできるようにする。
+- シミュレーションは、理想モデルに線分ごとの調整値を反映したペン先位置、toio 本体位置、向きを start から end までアニメーション表示する。
+- 床摩擦、滑り、加減速、電池残量による変化は初期版ではモデル化しない。実測誤差はキャリブレーションと線分ごとの調整で吸収する。
+
+### Dead reckoning コマンド形式
+
+Dead reckoning の実行コマンドは、Position ID 目標移動ではなく左右モーター個別速度と駆動時間へ変換する。
+
+```ts
+type DeadReckoningSegment = {
+  id: string;
+  kind: "draw" | "travel";
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+  lengthMm: number;
+  heading: number;
+  turnAngle: number;
+  speed: number;
+  durationScale: number;
+  steeringTrim: number;
+  turnDurationScale: number;
+};
+
+type TimedMotorStep =
+  | { type: "pen"; state: "up" | "down" }
+  | { type: "motor"; leftSpeed: number; rightSpeed: number; durationMs: number }
+  | { type: "wait"; ms: number };
+```
+
+BLE 制御層には、左右モーターを個別指定できる `timedMotorPair(leftSpeed, rightSpeed, durationMs)` を追加する。
+
+### 調整項目
+
+Dead reckoning の調整は、全体設定と線分ごとの設定に分ける。
+
+全体設定:
+
+- `turnSpeed`: 回転時の基準モーター速度。
+- `turnBalanceTrim`: 回転時の左右バランス補正。
+- `drawSpeed`: 描画線分の既定速度。
+- `travelSpeed`: pen-up travel 線分の既定速度。
+- `mmPerSecAtDrawSpeed`: 基準描画速度における実測移動速度。初期値は理想値とし、実機キャリブレーションで更新する。
+- `mmPerSecAtTravelSpeed`: 基準 travel 速度における実測移動速度。
+
+線分ごとの調整:
+
+- `speed`: その線分の直進モーター速度。
+- `durationScale`: 線分長から計算した直進時間への倍率。
+- `steeringTrim`: 直進時の左右モーター差補正。
+- `turnDurationScale`: その線分直前の回転時間への倍率。
+
+初期版では線分ごとの `enabled` は持たない。必要になった場合は詳細設定または次フェーズで追加する。
+
+### 実行と停止
+
+- Dead reckoning 実行前もシミュレーション必須とする。
+- Dead reckoning では、実行前に「ペン先を start 点に置き、toio 前方を最初の線分方向に合わせる」確認を表示する。
+- 実行中の主な安全停止は `Stop` ボタンとする。
+- BLE 書き込み失敗または切断時は移動用 toio とペン昇降用 toio の停止を試み、実行を中断する。
+- 座標を見ないため、実行中に用紙外へ出ることは検出しない。事前シミュレーションとユーザー確認で扱う。
+
+### 初期版の対象外
+
+- 線分ごとの `enabled`
+- 自動最短経路化
+- 摩擦、滑り、加減速の物理モデル
+- 実行中の Position ID 補正
+- 線分調整値の高度な保存、プロファイル管理
+
 ## 永続化
 
 ### キャリブレーション
