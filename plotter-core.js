@@ -16,7 +16,7 @@
 
   const NATIVE_MAT = { ...MAT };
   const DEFAULT_CONFIG = {
-    configVersion: 10,
+    configVersion: 12,
     safeScale: 0.75,
     fixedHeading: 0,
     penOffsetX: -48,
@@ -39,11 +39,13 @@
     penMotorMode: 0,
     settleMs: 250,
     runMode: "position",
-    deadTurnSpeed: 30,
+    deadTurnSpeed: 20,
     deadTurnBalanceTrim: 0,
+    deadTurnDurationScale: 1,
     deadMmPerSecAtDrawSpeed: 30,
     deadMmPerSecAtTravelSpeed: 35,
   };
+  const MIN_TURN_DURATION_MS = 100;
 
   function withDefaults(config = {}) {
     return { ...DEFAULT_CONFIG, ...config, configVersion: DEFAULT_CONFIG.configVersion };
@@ -281,7 +283,7 @@
       const speed = clamp(Number(saved.speed ?? baseSpeed), 1, 255);
       const durationScale = clamp(Number(saved.durationScale ?? 1), 0.1, 5);
       const steeringTrim = clamp(Number(saved.steeringTrim ?? 0), -80, 80);
-      const turnDurationScale = clamp(Number(saved.turnDurationScale ?? 1), 0.1, 5);
+      const turnDurationScale = clamp(Number(saved.turnDurationScale ?? config.deadTurnDurationScale ?? 1), 0.1, 5);
       const startCube = penToCube(start, heading, config);
       const endCube = penToCube(end, heading, config);
       return {
@@ -426,7 +428,7 @@
   function computeTurnDurationMs(angleDeg, turnSpeed, turnDurationScale) {
     if (Math.abs(angleDeg) < 0.1) return 0;
     const degPerSec = Math.max(10, Math.abs(turnSpeed) * 4);
-    return Math.max(10, Math.round((Math.abs(angleDeg) / degPerSec) * 1000 * turnDurationScale));
+    return Math.max(MIN_TURN_DURATION_MS, Math.round((Math.abs(angleDeg) / degPerSec) * 1000 * turnDurationScale));
   }
 
   function cubeToPen(point, theta, configInput = {}) {

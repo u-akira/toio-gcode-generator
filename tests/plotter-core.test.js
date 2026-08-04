@@ -20,6 +20,10 @@ function simulate(stroke, config = {}) {
   ).plan([stroke]);
 }
 
+test("default dead reckoning turn speed is conservative for calibration", () => {
+  assert.equal(core.DEFAULT_CONFIG.deadTurnSpeed, 20);
+});
+
 test("pen front/back offset changes simulated cube path", () => {
   const stroke = makeStroke([
     [190, 250],
@@ -188,6 +192,43 @@ test("dead reckoning changes draw direction with motor-only transition steps", (
   assert.equal(turnToDraw.x, second.startCube.x);
   assert.equal(turnToDraw.y, second.startCube.y);
   assert.equal(result.commands.some((command) => command.type === "align"), false);
+});
+
+test("dead reckoning global turn duration scale affects turn commands", () => {
+  const base = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnDurationScale: 1 })).plan([
+    makeStroke([
+      [190, 250],
+      [250, 250],
+      [250, 310],
+    ]),
+  ]);
+  const scaled = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnDurationScale: 0.5 })).plan([
+    makeStroke([
+      [190, 250],
+      [250, 250],
+      [250, 310],
+    ]),
+  ]);
+  const baseTurn = base.commands.find((command) => command.type === "turn" && Math.abs(command.angle) > 1);
+  const scaledTurn = scaled.commands.find((command) => command.type === "turn" && Math.abs(command.angle) > 1);
+
+  assert.ok(baseTurn);
+  assert.ok(scaledTurn);
+  assert.ok(scaledTurn.durationMs < baseTurn.durationMs);
+});
+
+test("dead reckoning turn commands keep a practical minimum duration", () => {
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnSpeed: 20, deadTurnDurationScale: 0.33 })).plan([
+    makeStroke([
+      [190, 250],
+      [250, 250],
+      [309, 260],
+    ]),
+  ]);
+  const smallTurn = result.commands.find((command) => command.type === "turn" && Math.abs(command.angle) > 1);
+
+  assert.ok(smallTurn);
+  assert.ok(smallTurn.durationMs >= 100);
 });
 
 test("signed angle delta returns the shortest turn", () => {

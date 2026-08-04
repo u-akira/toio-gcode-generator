@@ -24,6 +24,7 @@ const POSITION_RETRY_WAIT_MS = 3000;
 const POSITION_RETRY_POLL_MS = 100;
 const POSITION_TARGET_RETRY_COUNT = 1;
 const POSITION_UI_REFRESH_MS = 300;
+const MIN_TURN_DURATION_MS = 100;
 
 const els = {
   canvas: document.getElementById("plotCanvas"),
@@ -53,6 +54,12 @@ const els = {
   toioCommandOutput: document.getElementById("toioCommandOutput"),
   prevSegmentBtn: document.getElementById("prevSegmentBtn"),
   nextSegmentBtn: document.getElementById("nextSegmentBtn"),
+  simPauseBtn: document.getElementById("simPauseBtn"),
+  simPrevStepBtn: document.getElementById("simPrevStepBtn"),
+  simNextStepBtn: document.getElementById("simNextStepBtn"),
+  turnCalibrationOutput: document.getElementById("turnCalibrationOutput"),
+  applyTurnScaleBtn: document.getElementById("applyTurnScaleBtn"),
+  clearTurnLogBtn: document.getElementById("clearTurnLogBtn"),
 };
 
 const configInputs = [
@@ -66,6 +73,7 @@ const configInputs = [
   "travelSpeed",
   "deadTurnSpeed",
   "deadTurnBalanceTrim",
+  "deadTurnDurationScale",
   "deadMmPerSecAtDrawSpeed",
   "deadMmPerSecAtTravelSpeed",
   "smoothing",
@@ -97,7 +105,9 @@ let activeStroke = null;
 let simulation = null;
 let simulationValid = false;
 let simulationAnimation = null;
+let activeSimulationCommandIndex = -1;
 let deadSegmentSettings = loadDeadSegmentSettings();
+let turnCalibrationLog = loadTurnCalibrationLog();
 let selectedDeadSegmentId = null;
 let running = false;
 let abortRun = false;
@@ -157,6 +167,12 @@ function loadConfig() {
       saved.deadMmPerSecAtDrawSpeed = DEFAULT_CONFIG.deadMmPerSecAtDrawSpeed;
       saved.deadMmPerSecAtTravelSpeed = DEFAULT_CONFIG.deadMmPerSecAtTravelSpeed;
     }
+    if ((saved.configVersion || 0) < 11) {
+      saved.deadTurnDurationScale = DEFAULT_CONFIG.deadTurnDurationScale;
+    }
+    if ((saved.configVersion || 0) < 12 && saved.deadTurnSpeed === 30) {
+      saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
+    }
     return { ...DEFAULT_CONFIG, ...saved, configVersion: DEFAULT_CONFIG.configVersion };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -177,6 +193,18 @@ function loadDeadSegmentSettings() {
 
 function saveDeadSegmentSettings() {
   localStorage.setItem("toioPlotterDeadSegmentSettings", JSON.stringify(deadSegmentSettings));
+}
+
+function loadTurnCalibrationLog() {
+  try {
+    return JSON.parse(localStorage.getItem("toioPlotterTurnCalibrationLog") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveTurnCalibrationLog() {
+  localStorage.setItem("toioPlotterTurnCalibrationLog", JSON.stringify(turnCalibrationLog));
 }
 
 function resetDeadSegmentSettings() {
@@ -219,6 +247,7 @@ function applyConfigFromForm({ invalidate = true } = {}) {
 
 function readConfigFromForm() {
   applyConfigFromForm({ invalidate: true });
+  renderTurnCalibration();
 }
 
 function invalidateSimulation(reason) {
@@ -335,14 +364,13 @@ function draw() {
 function drawDeadSegmentSelectionOverlay() {
   const drawSegments = getDrawSegments();
   if (!isDeadMode() || !drawSegments.length) return;
-  for (let index = 0; index < drawSegments.length; index += 1) {
-    const segment = drawSegments[index];
+  for (const segment of drawSegments) {
     const selected = segment.id === selectedDeadSegmentId;
-    drawSegmentHighlight(segment, index + 1, selected);
+    drawSegmentHighlight(segment, selected);
   }
 }
 
-function drawSegmentHighlight(segment, labelNumber, selected) {
+function drawSegmentHighlight(segment, selected) {
   const dpr = window.devicePixelRatio || 1;
   const start = matToCanvas(segment.start);
   const end = matToCanvas(segment.end);
@@ -354,21 +382,6 @@ function drawSegmentHighlight(segment, labelNumber, selected) {
   ctx.moveTo(start.x, start.y);
   ctx.lineTo(end.x, end.y);
   ctx.stroke();
-
-  const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
-  const label = `#${labelNumber}`;
-  ctx.font = `bold ${11 * dpr}px system-ui`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  const width = ctx.measureText(label).width + 10 * dpr;
-  const height = 17 * dpr;
-  ctx.fillStyle = selected ? "#bd2f2f" : "#2563eb";
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 1.5 * dpr;
-  ctx.fillRect(mid.x - width / 2, mid.y - height / 2, width, height);
-  ctx.strokeRect(mid.x - width / 2, mid.y - height / 2, width, height);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillText(label, mid.x, mid.y);
   ctx.restore();
 }
 
@@ -769,33 +782,120 @@ function startSimulationAnimation() {
   const timeline = buildSimulationTimeline(simulation.commands);
   simulationAnimation = {
     startedAt: performance.now(),
+    elapsedMs: 0,
     durationMs: Math.max(600, timeline.durationMs),
     timeline,
+    playing: true,
     frameId: null,
   };
   const tick = () => {
     if (!simulationAnimation) return;
-    const elapsed = performance.now() - simulationAnimation.startedAt;
+    const elapsed = getSimulationElapsedMs();
     if (elapsed >= simulationAnimation.durationMs) {
+      activeSimulationCommandIndex = lastPlayableCommandIndex(simulationAnimation.timeline);
       simulationAnimation = null;
+      syncSimulationControls();
+      updateActiveCommandRow();
       draw();
       return;
     }
+    activeSimulationCommandIndex = activeCommandIndexAtElapsed(simulationAnimation.timeline, elapsed);
+    updateActiveCommandRow();
     draw();
-    if (simulationAnimation) simulationAnimation.frameId = requestAnimationFrame(tick);
+    if (simulationAnimation?.playing) simulationAnimation.frameId = requestAnimationFrame(tick);
   };
   simulationAnimation.frameId = requestAnimationFrame(tick);
+  syncSimulationControls();
 }
 
 function stopSimulationAnimation() {
-  if (!simulationAnimation) return;
-  if (simulationAnimation.frameId) cancelAnimationFrame(simulationAnimation.frameId);
+  if (simulationAnimation?.frameId) cancelAnimationFrame(simulationAnimation.frameId);
   simulationAnimation = null;
+  activeSimulationCommandIndex = -1;
+  syncSimulationControls();
+  updateActiveCommandRow();
+}
+
+function getSimulationElapsedMs() {
+  if (!simulationAnimation) return Infinity;
+  return simulationAnimation.playing ? performance.now() - simulationAnimation.startedAt : simulationAnimation.elapsedMs;
+}
+
+function toggleSimulationPause() {
+  if (!simulationAnimation) return;
+  if (simulationAnimation.playing) {
+    simulationAnimation.elapsedMs = getSimulationElapsedMs();
+    simulationAnimation.playing = false;
+    if (simulationAnimation.frameId) cancelAnimationFrame(simulationAnimation.frameId);
+    simulationAnimation.frameId = null;
+  } else {
+    simulationAnimation.playing = true;
+    simulationAnimation.startedAt = performance.now() - simulationAnimation.elapsedMs;
+    const tick = () => {
+      if (!simulationAnimation) return;
+      const elapsed = getSimulationElapsedMs();
+      if (elapsed >= simulationAnimation.durationMs) {
+        activeSimulationCommandIndex = lastPlayableCommandIndex(simulationAnimation.timeline);
+        simulationAnimation = null;
+        syncSimulationControls();
+        updateActiveCommandRow();
+        draw();
+        return;
+      }
+      activeSimulationCommandIndex = activeCommandIndexAtElapsed(simulationAnimation.timeline, elapsed);
+      updateActiveCommandRow();
+      draw();
+      if (simulationAnimation?.playing) simulationAnimation.frameId = requestAnimationFrame(tick);
+    };
+    simulationAnimation.frameId = requestAnimationFrame(tick);
+  }
+  syncSimulationControls();
+  draw();
+}
+
+function stepSimulation(delta) {
+  if (!simulationValid || !simulation?.commands?.length) return;
+  if (!simulationAnimation) {
+    const timeline = buildSimulationTimeline(simulation.commands);
+    if (!timeline.items.length) return;
+    simulationAnimation = {
+      startedAt: performance.now(),
+      elapsedMs: 0,
+      durationMs: Math.max(600, timeline.durationMs),
+      timeline,
+      playing: false,
+      frameId: null,
+    };
+  }
+  if (simulationAnimation.frameId) cancelAnimationFrame(simulationAnimation.frameId);
+  const current = activeSimulationCommandIndex < 0 ? -1 : activeSimulationCommandIndex;
+  const currentItemIndex = simulationAnimation.timeline.items.findIndex((item) => item.commandIndex === current);
+  const nextItemIndex = clamp((currentItemIndex < 0 ? -1 : currentItemIndex) + delta, 0, simulationAnimation.timeline.items.length - 1);
+  const item = simulationAnimation.timeline.items[nextItemIndex];
+  if (!item) return;
+  simulationAnimation.elapsedMs = item.startMs + Math.min(1, Math.max(0, item.endMs - item.startMs) / 2);
+  simulationAnimation.startedAt = performance.now() - simulationAnimation.elapsedMs;
+  simulationAnimation.playing = false;
+  simulationAnimation.frameId = null;
+  activeSimulationCommandIndex = item.commandIndex;
+  syncSimulationControls();
+  updateActiveCommandRow();
+  draw();
+}
+
+function syncSimulationControls() {
+  const enabled = Boolean(simulationValid && simulation?.commands?.length);
+  if (els.simPauseBtn) {
+    els.simPauseBtn.disabled = !enabled || !simulationAnimation;
+    els.simPauseBtn.textContent = simulationAnimation?.playing ? "Pause" : "Play";
+  }
+  if (els.simPrevStepBtn) els.simPrevStepBtn.disabled = !enabled;
+  if (els.simNextStepBtn) els.simNextStepBtn.disabled = !enabled;
 }
 
 function getAnimatedCommands() {
   if (!simulationAnimation) return simulation?.commands || [];
-  const elapsed = performance.now() - simulationAnimation.startedAt;
+  const elapsed = getSimulationElapsedMs();
   return commandsAtElapsed(simulationAnimation.timeline, elapsed);
 }
 
@@ -805,11 +905,14 @@ function buildSimulationTimeline(commands) {
   let lastPenPoint = null;
   let lastTheta = null;
   let lastCubePose = null;
-  for (const command of commands) {
+  for (let index = 0; index < commands.length; index += 1) {
+    const command = commands[index];
     const durationMs = commandDurationMs(command, lastPenPoint);
     const fromTheta = command.type === "turn" && lastTheta == null && command.angle != null ? command.theta - command.angle : lastTheta;
-    items.push({ command, startMs: cursorMs, endMs: cursorMs + durationMs, from: lastPenPoint, fromTheta, fromCubePose: lastCubePose });
-    cursorMs += durationMs;
+    if (isPlayableMoveCommand(command)) {
+      items.push({ command, commandIndex: index, startMs: cursorMs, endMs: cursorMs + durationMs, from: lastPenPoint, fromTheta, fromCubePose: lastCubePose });
+      cursorMs += durationMs;
+    }
     if (command.theta != null) lastTheta = command.theta;
     if (command.x != null && command.y != null && command.theta != null) {
       lastCubePose = { x: command.x, y: command.y, theta: command.theta };
@@ -824,9 +927,15 @@ function buildSimulationTimeline(commands) {
   return { items, durationMs: cursorMs };
 }
 
+function isPlayableMoveCommand(command) {
+  return command.type === "move" || command.type === "rotate" || command.type === "motor" || command.type === "turn";
+}
+
 function commandDurationMs(command, lastPenPoint) {
   if (command.type === "wait") return command.ms;
-  if (command.type === "motor" || command.type === "turn") return Math.max(80, command.durationMs || 0);
+  if (command.type === "turn") return Math.max(MIN_TURN_DURATION_MS, command.durationMs || 0);
+  if (command.type === "motor") return Math.max(80, command.durationMs || 0);
+  if ((command.type === "move" || command.type === "rotate") && command.durationMs) return Math.max(80, command.durationMs);
   if (command.type === "move" && command.penX != null && lastPenPoint) {
     return clamp(distance(lastPenPoint, { x: command.penX, y: command.penY }) * 12, 160, 1200);
   }
@@ -834,18 +943,29 @@ function commandDurationMs(command, lastPenPoint) {
   return 80;
 }
 
+function activeCommandIndexAtElapsed(timeline, elapsedMs) {
+  if (!timeline.items.length) return -1;
+  const item = timeline.items.find((entry) => elapsedMs >= entry.startMs && elapsedMs < entry.endMs);
+  if (item) return item.commandIndex;
+  return elapsedMs >= timeline.durationMs ? lastPlayableCommandIndex(timeline) : timeline.items[0].commandIndex;
+}
+
+function lastPlayableCommandIndex(timeline) {
+  return timeline.items[timeline.items.length - 1]?.commandIndex ?? -1;
+}
+
 function commandsAtElapsed(timeline, elapsedMs) {
-  const result = [];
+  if (!timeline.items.length) return simulation?.commands || [];
   for (const item of timeline.items) {
     if (elapsedMs >= item.endMs) {
-      result.push(item.command);
       continue;
     }
-    if (elapsedMs < item.startMs) break;
-    result.push(partialCommand(item, elapsedMs));
-    break;
+    const endIndex = elapsedMs < item.startMs ? item.commandIndex : item.commandIndex + 1;
+    const result = simulation.commands.slice(0, endIndex);
+    if (elapsedMs >= item.startMs) result[result.length - 1] = partialCommand(item, elapsedMs);
+    return result.filter(Boolean);
   }
-  return result.filter(Boolean);
+  return simulation.commands;
 }
 
 function partialCommand(item, elapsedMs) {
@@ -1014,6 +1134,442 @@ function formatAngle(angle) {
   return `${angle >= 0 ? "+" : ""}${Number(angle || 0).toFixed(0)}°`;
 }
 
+function renderToioCommandOutput() {
+  if (!els.toioCommandOutput) return;
+  if (!simulationValid || !simulation) {
+    els.toioCommandOutput.textContent = "Simulate after drawing to show commands.";
+    syncSimulationControls();
+    return;
+  }
+  els.toioCommandOutput.innerHTML = simulation.commands.map((command, index) => commandRowTemplate(command, index)).filter(Boolean).join("");
+  syncSimulationControls();
+  updateActiveCommandRow();
+}
+
+function commandRowTemplate(command, index) {
+  const label = isDeadMode() ? formatDeadToioCommand(command) : formatPositionToioCommand(command);
+  if (!label) return "";
+  return `
+    <div class="command-row" data-command-index="${index}">
+      <button class="command-step-button" type="button" data-command-step="${index}">${String(index + 1).padStart(2, "0")}</button>
+      <div class="command-main">
+        <div class="command-label">${escapeHtml(label)}</div>
+        ${commandControlsTemplate(command, index)}
+      </div>
+    </div>
+  `;
+}
+
+function commandControlsTemplate(command, index) {
+  if (command.type === "pen") {
+    return "";
+  }
+  if (command.type === "move" || command.type === "rotate") {
+    return `
+      <div class="command-fields">
+        ${commandInputTemplate(index, "speed", "speed", command.speed, 1, 10, 255)}
+        ${commandInputTemplate(index, "durationMs", "sim ms", displayCommandDurationMs(index), 10, 80, 10000)}
+      </div>
+    `;
+  }
+  if (command.type === "motor") {
+    return `
+      <div class="command-fields">
+        ${commandInputTemplate(index, "speed", "speed", motorStraightSpeed(command), 1, -255, 255)}
+        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || MIN_TURN_DURATION_MS, 10, MIN_TURN_DURATION_MS, 2550)}
+      </div>
+    `;
+  }
+  if (command.type === "turn") {
+    const speeds = turnWheelSpeeds(command);
+    return `
+      <div class="command-fields">
+        ${commandInputTemplate(index, "leftSpeed", "L", speeds.left, 1, -255, 255)}
+        ${commandInputTemplate(index, "rightSpeed", "R", speeds.right, 1, -255, 255)}
+        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || 0, 10, 0, 2550)}
+      </div>
+    `;
+  }
+  if (command.type === "wait") {
+    return `<div class="command-fields">${commandInputTemplate(index, "ms", "ms", command.ms, 10, 0, 10000)}</div>`;
+  }
+  return "";
+}
+
+function motorStraightSpeed(command) {
+  if (command.speed != null) return command.speed;
+  return Math.round(((command.leftSpeed || 0) + (command.rightSpeed || 0)) / 2);
+}
+
+function displayCommandDurationMs(index) {
+  const command = simulation?.commands?.[index];
+  if (!command) return 0;
+  if (command.durationMs != null) return command.durationMs;
+  let lastPenPoint = null;
+  for (let i = 0; i < index; i += 1) {
+    const previous = simulation.commands[i];
+    if ((previous.type === "move" || previous.type === "motor") && previous.penX != null) {
+      lastPenPoint = { x: previous.penX, y: previous.penY };
+    }
+    if (previous.type === "pen" && previous.penX != null) {
+      lastPenPoint = { x: previous.penX, y: previous.penY };
+    }
+  }
+  return commandDurationMs(command, lastPenPoint);
+}
+
+function commandInputTemplate(index, key, label, value, step, min, max) {
+  const rounded = Number(value || 0).toFixed(step < 1 ? 2 : 0);
+  return `<label>${label}<input data-command-index="${index}" data-command-key="${key}" type="number" min="${min}" max="${max}" step="${step}" value="${rounded}" /></label>`;
+}
+
+function getPenCommandSpeed(command) {
+  if (command.speed != null) return command.speed;
+  return command.state === "up" ? config.upMotorSpeed : config.downMotorSpeed;
+}
+
+function getPenCommandDuration(command) {
+  if (command.durationMs != null) return command.durationMs;
+  return command.state === "up" ? config.upDurationMs : config.downDurationMs;
+}
+
+function updateActiveCommandRow() {
+  if (!els.toioCommandOutput?.querySelectorAll) return;
+  for (const row of els.toioCommandOutput.querySelectorAll(".command-row")) {
+    row.classList.toggle("active", Number(row.dataset.commandIndex) === activeSimulationCommandIndex);
+  }
+}
+
+function updateCommandEdit(input, { render = true } = {}) {
+  if (!simulation?.commands) return;
+  const index = Number(input.dataset.commandIndex);
+  const key = input.dataset.commandKey;
+  const command = simulation.commands[index];
+  if (!command || !key) return;
+  if (input.value === "" || input.value === "-") return;
+  if (command.type === "motor" && (key === "speed" || key === "durationMs")) {
+    ensureMotorBaseline(command);
+  }
+  if (command.type === "turn" && (key === "leftSpeed" || key === "rightSpeed" || key === "durationMs") && !command.manualWheelSpeeds) {
+    const speeds = turnWheelSpeeds(command);
+    command.leftSpeed = speeds.left;
+    command.rightSpeed = speeds.right;
+  }
+  const value = command.type === "turn" && key === "durationMs" ? Math.max(MIN_TURN_DURATION_MS, Number(input.value)) : Number(input.value);
+  command[key] = value;
+  if (command.type === "motor" && (key === "speed" || key === "durationMs")) {
+    command.leftSpeed = command.speed;
+    command.rightSpeed = command.speed;
+    updateStraightMotorPose(command);
+  }
+  if (command.type === "turn" && (key === "leftSpeed" || key === "rightSpeed" || key === "durationMs")) {
+    command.manualWheelSpeeds = true;
+    updateManualTurnPose(command, index);
+  }
+  if (simulationAnimation?.frameId) cancelAnimationFrame(simulationAnimation.frameId);
+  const timeline = buildSimulationTimeline(simulation.commands);
+  const item = timelineItemForCommand(timeline, index);
+  simulationAnimation = {
+    startedAt: performance.now(),
+    elapsedMs: item?.startMs || 0,
+    durationMs: Math.max(600, timeline.durationMs),
+    timeline,
+    playing: false,
+    frameId: null,
+  };
+  activeSimulationCommandIndex = index;
+  if (render) {
+    renderToioCommandOutput();
+  } else {
+    syncSimulationControls();
+    updateActiveCommandRow();
+  }
+  draw();
+}
+
+function ensureMotorBaseline(command) {
+  if (command.baseMotion) return;
+  command.speed = motorStraightSpeed(command);
+  command.baseMotion = {
+    speed: command.speed || 1,
+    durationMs: command.durationMs || 1,
+    fromX: command.fromX,
+    fromY: command.fromY,
+    x: command.x,
+    y: command.y,
+    theta: command.theta,
+  };
+}
+
+function updateStraightMotorPose(command) {
+  const base = command.baseMotion;
+  if (!base || base.fromX == null || base.fromY == null || base.x == null || base.y == null) return;
+  const speedScale = (command.speed || 0) / (Math.abs(base.speed || 1) < 1 ? 1 : base.speed);
+  const durationScale = (command.durationMs || 0) / Math.max(1, base.durationMs || 1);
+  const scale = speedScale * durationScale;
+  command.leftSpeed = command.speed;
+  command.rightSpeed = command.speed;
+  command.fromX = base.fromX;
+  command.fromY = base.fromY;
+  command.x = base.fromX + (base.x - base.fromX) * scale;
+  command.y = base.fromY + (base.y - base.fromY) * scale;
+  command.theta = base.theta;
+  const penPoint = cubeToPen({ x: command.x, y: command.y }, command.theta || 0, config);
+  command.penX = penPoint.x;
+  command.penY = penPoint.y;
+}
+
+function updateManualTurnPose(command, index) {
+  const fromTheta = turnStartThetaAtCommand(index, command);
+  const angle = manualTurnAngle(command);
+  command.angle = angle;
+  command.theta = normalizeDegrees(fromTheta + angle);
+  const penPoint = command.x != null && command.y != null ? cubeToPen({ x: command.x, y: command.y }, command.theta, config) : null;
+  if (penPoint) {
+    command.penX = penPoint.x;
+    command.penY = penPoint.y;
+  }
+}
+
+function turnStartThetaAtCommand(index, command) {
+  let lastTheta = null;
+  for (let i = 0; i < index; i += 1) {
+    const previous = simulation.commands[i];
+    if (previous.theta != null) lastTheta = previous.theta;
+  }
+  if (lastTheta != null) return lastTheta;
+  return command.theta - (command.angle || 0);
+}
+
+function manualTurnAngle(command) {
+  const speeds = turnWheelSpeeds(command);
+  const calibratedScale = Math.max(0.1, Math.abs(config.deadTurnDurationScale || 1));
+  const angularSpeedDegPerSec = (((speeds.left - speeds.right) / 2) * 4) / calibratedScale;
+  return angularSpeedDegPerSec * ((command.durationMs || 0) / 1000);
+}
+
+function normalizeDegrees(value) {
+  return ((value % 360) + 360) % 360;
+}
+
+function jumpToCommand(index) {
+  if (!simulationValid || !simulation?.commands?.length) return;
+  if (simulationAnimation?.frameId) cancelAnimationFrame(simulationAnimation.frameId);
+  const timeline = buildSimulationTimeline(simulation.commands);
+  const item = timelineItemForCommand(timeline, index);
+  if (!item) return;
+  simulationAnimation = {
+    startedAt: performance.now(),
+    elapsedMs: item.startMs,
+    durationMs: Math.max(600, timeline.durationMs),
+    timeline,
+    playing: false,
+    frameId: null,
+  };
+  activeSimulationCommandIndex = index;
+  syncSimulationControls();
+  updateActiveCommandRow();
+  draw();
+}
+
+function timelineItemForCommand(timeline, commandIndex) {
+  return timeline.items.find((item) => item.commandIndex === commandIndex) || null;
+}
+
+function formatDeadToioCommands(commands) {
+  return commands.map((command, index) => `${String(index + 1).padStart(2, "0")}. ${formatDeadToioCommand(command)}`).join("\n");
+}
+
+function formatDeadToioCommand(command) {
+  if (command.type === "pen") {
+    const action = command.state === "up" ? "UP" : "DOWN";
+    return `pen: ${action} speed:${getPenCommandSpeed(command)}, ${formatSeconds(getPenCommandDuration(command))}`;
+  }
+  if (command.type === "turn") {
+    const speeds = turnWheelSpeeds(command);
+    return `move: turn ${formatAngle(command.angle)} / R:${speeds.right}, L:${speeds.left}, ${formatSeconds(command.durationMs)}`;
+  }
+  if (command.type === "motor") {
+    const label = command.kind === "draw" ? "draw straight" : "travel straight";
+    return `move: ${label} / speed:${motorStraightSpeed(command)}, ${formatSeconds(command.durationMs)}`;
+  }
+  if (command.type === "wait") return `wait: ${formatSeconds(command.ms)}`;
+  return null;
+}
+
+function formatPositionToioCommands(commands) {
+  return commands.map((command, index) => `${String(index + 1).padStart(2, "0")}. ${formatPositionToioCommand(command)}`).join("\n");
+}
+
+function formatPositionToioCommand(command) {
+  if (command.type === "pen") {
+    const action = command.state === "up" ? "UP" : "DOWN";
+    return `pen: ${action} speed:${getPenCommandSpeed(command)}, ${formatSeconds(getPenCommandDuration(command))}`;
+  }
+  if (command.type === "move" || command.type === "rotate") {
+    return `move: ${command.type} x:${command.x.toFixed(1)}, y:${command.y.toFixed(1)}, theta:${command.theta.toFixed(0)}, speed:${command.speed}`;
+  }
+  if (command.type === "wait") return `wait: ${formatSeconds(command.ms)}`;
+  return null;
+}
+
+function turnWheelSpeeds(command) {
+  if (command.manualWheelSpeeds) {
+    return {
+      left: Math.round(clamp(command.leftSpeed || 0, -255, 255)),
+      right: Math.round(clamp(command.rightSpeed || 0, -255, 255)),
+    };
+  }
+  const direction = command.angle >= 0 ? 1 : -1;
+  const base = turnBaseSpeedForCommand(command);
+  const trim = config.deadTurnBalanceTrim;
+  return {
+    left: Math.round(direction * clamp(base + trim, 0, 255)),
+    right: Math.round(-direction * clamp(base - trim, 0, 255)),
+  };
+}
+
+function turnBaseSpeedForCommand(command) {
+  if (command.durationMs && Math.abs(command.angle || 0) > 0.1) {
+    const calibratedScale = Math.max(0.1, Math.abs(config.deadTurnDurationScale || 1));
+    const effectiveMs = Math.max(MIN_TURN_DURATION_MS, command.durationMs);
+    return clamp((Math.abs(command.angle) * calibratedScale * 1000) / (4 * effectiveMs), 0, Math.abs(config.deadTurnSpeed));
+  }
+  return Math.abs(config.deadTurnSpeed);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+const TURN_CALIBRATION_TESTS = [
+  { id: "plus90", label: "+90", targetAngle: 90 },
+  { id: "minus90", label: "-90", targetAngle: -90 },
+  { id: "plus180", label: "+180", targetAngle: 180 },
+];
+
+function renderTurnCalibration() {
+  if (!els.turnCalibrationOutput) return;
+  const rows = TURN_CALIBRATION_TESTS.map((test) => turnCalibrationRowTemplate(test)).join("");
+  const recommended = recommendedTurnScale();
+  els.turnCalibrationOutput.innerHTML = `
+    <div class="turn-calibration-summary">
+      <span>recommended: ${recommended == null ? "--" : recommended.toFixed(2)}</span>
+      <span>current: ${Number(config.deadTurnDurationScale || 1).toFixed(2)}</span>
+    </div>
+    ${rows}
+  `;
+  if (els.applyTurnScaleBtn) els.applyTurnScaleBtn.disabled = recommended == null;
+}
+
+function turnCalibrationRowTemplate(test) {
+  const entry = turnCalibrationLog[test.id] || {};
+  const ms = turnTestDurationMs(test.targetAngle);
+  const speeds = turnWheelSpeeds({ angle: test.targetAngle });
+  const stats = turnCalibrationStats(test, entry);
+  return `
+    <div class="turn-test-row" data-turn-test-id="${test.id}">
+      <div class="turn-test-main">
+        <strong>${test.label}</strong>
+        <span>L:${speeds.left}</span>
+        <span>R:${speeds.right}</span>
+        <span>ms:${ms}</span>
+      </div>
+      <div class="turn-test-inputs">
+        ${turnRunInputTemplate(test.id, 0, entry.runs?.[0])}
+        ${turnRunInputTemplate(test.id, 1, entry.runs?.[1])}
+        ${turnRunInputTemplate(test.id, 2, entry.runs?.[2])}
+      </div>
+      <div class="turn-test-result">
+        <span>avg:${stats.avg == null ? "--" : stats.avg.toFixed(1)}</span>
+        <span>range:${stats.range == null ? "--" : stats.range.toFixed(1)}</span>
+        <span>scale:${stats.scale == null ? "--" : stats.scale.toFixed(2)}</span>
+      </div>
+      <button type="button" data-run-turn-test="${test.id}">Run</button>
+    </div>
+  `;
+}
+
+function turnRunInputTemplate(testId, runIndex, value) {
+  const display = value == null || value === "" ? "" : Number(value).toFixed(0);
+  return `<label>run${runIndex + 1}<input data-turn-test-id="${testId}" data-turn-run-index="${runIndex}" type="number" step="1" value="${display}" /></label>`;
+}
+
+function turnTestDurationMs(targetAngle) {
+  const degPerSec = Math.max(10, Math.abs(config.deadTurnSpeed) * 4);
+  return Math.max(MIN_TURN_DURATION_MS, Math.round((Math.abs(targetAngle) / degPerSec) * 1000 * (config.deadTurnDurationScale || 1)));
+}
+
+function turnCalibrationStats(test, entry) {
+  const runs = (entry.runs || []).map(Number).filter((value) => Number.isFinite(value) && value !== 0);
+  if (!runs.length) return { avg: null, range: null, scale: null };
+  const absolutes = runs.map((value) => Math.abs(value));
+  const avg = absolutes.reduce((sum, value) => sum + value, 0) / absolutes.length;
+  const range = Math.max(...absolutes) - Math.min(...absolutes);
+  const scale = Math.abs(test.targetAngle) / avg;
+  return { avg, range, scale };
+}
+
+function recommendedTurnScale() {
+  const scales = [];
+  for (const test of TURN_CALIBRATION_TESTS) {
+    const stats = turnCalibrationStats(test, turnCalibrationLog[test.id] || {});
+    if (stats.scale != null && (stats.range == null || stats.range <= 15)) scales.push(stats.scale);
+  }
+  if (!scales.length) return null;
+  return scales.reduce((sum, value) => sum + value, 0) / scales.length;
+}
+
+function updateTurnCalibrationInput(input) {
+  const testId = input.dataset.turnTestId;
+  const runIndex = Number(input.dataset.turnRunIndex);
+  if (!testId || !Number.isInteger(runIndex)) return;
+  const entry = turnCalibrationLog[testId] || { runs: [] };
+  entry.runs = entry.runs || [];
+  entry.runs[runIndex] = input.value === "" || input.value === "-" ? "" : Number(input.value);
+  turnCalibrationLog[testId] = entry;
+  saveTurnCalibrationLog();
+}
+
+function finalizeTurnCalibrationInput() {
+  renderTurnCalibration();
+}
+
+function applyRecommendedTurnScale() {
+  const recommended = recommendedTurnScale();
+  if (recommended == null) return;
+  config.deadTurnDurationScale = clamp(Number(recommended.toFixed(2)), 0.1, 5);
+  saveConfig();
+  syncConfigToForm();
+  invalidateSimulation("回転倍率を更新しました");
+  renderTurnCalibration();
+  draw();
+}
+
+function clearTurnCalibrationLog() {
+  turnCalibrationLog = {};
+  saveTurnCalibrationLog();
+  renderTurnCalibration();
+}
+
+async function runTurnCalibrationTest(testId) {
+  const test = TURN_CALIBRATION_TESTS.find((item) => item.id === testId);
+  if (!test) return;
+  if (!moveCube) {
+    log("移動用 toio を接続してください。");
+    return;
+  }
+  const ms = turnTestDurationMs(test.targetAngle);
+  const speeds = turnWheelSpeeds({ angle: test.targetAngle });
+  log(`turn test ${test.label}: L=${speeds.left} R=${speeds.right} ${ms}ms`);
+  await moveCube.timedMotorPair(speeds.left, speeds.right, ms);
+  await sleep(ms);
+}
+
 function segmentInputTemplate(segmentId, key, label, value, step) {
   return `<label>${label}<input data-segment-id="${segmentId}" data-segment-key="${key}" type="number" step="${step}" value="${Number(value).toFixed(step < 1 ? 2 : 0)}" /></label>`;
 }
@@ -1124,7 +1680,7 @@ async function runToio() {
         if (command.state === "down") {
           await ensureFreshPositionOrRetry("pen down 前");
         }
-        await setPen(command.state);
+        await setPen(command.state, command);
         await ensureFreshPositionAfterPen(command.state, Date.now());
       } else if (command.type === "move" || command.type === "rotate") {
         const nativePoint = matToNativePoint(command);
@@ -1148,12 +1704,14 @@ async function runToio() {
   }
 }
 
-async function setPen(state) {
+async function setPen(state, command = null) {
   if (!penCube) throw new Error("ペン昇降用 toio が未接続です。");
+  const speed = command ? getPenCommandSpeed(command) : state === "up" ? config.upMotorSpeed : config.downMotorSpeed;
+  const durationMs = command ? getPenCommandDuration(command) : state === "up" ? config.upDurationMs : config.downDurationMs;
   if (state === "up") {
-    await penCube.timedMotor(config.upMotorSpeed, config.upDurationMs, config.penMotorMode);
+    await penCube.timedMotor(speed, durationMs, config.penMotorMode);
   } else {
-    await penCube.timedMotor(config.downMotorSpeed, config.downDurationMs, config.penMotorMode);
+    await penCube.timedMotor(speed, durationMs, config.penMotorMode);
   }
   await sleep(config.settleMs);
 }
@@ -1402,7 +1960,7 @@ async function runDeadReckoningToio() {
     for (const command of simulation.commands) {
       if (abortRun) throw new Error("Emergency stop");
       if (command.type === "pen") {
-        await setPen(command.state);
+        await setPen(command.state, command);
       } else if (command.type === "turn") {
         await runDeadTurn(command);
       } else if (command.type === "motor") {
@@ -1425,19 +1983,19 @@ async function runDeadReckoningToio() {
 
 async function runDeadTurn(command) {
   if (!command.durationMs) return;
-  const direction = command.angle >= 0 ? 1 : -1;
-  const base = Math.abs(config.deadTurnSpeed);
-  const trim = config.deadTurnBalanceTrim;
-  const leftSpeed = direction * clamp(base + trim, 0, 255);
-  const rightSpeed = -direction * clamp(base - trim, 0, 255);
+  const durationMs = Math.max(MIN_TURN_DURATION_MS, command.durationMs);
+  const speeds = turnWheelSpeeds(command);
+  const leftSpeed = speeds.left;
+  const rightSpeed = speeds.right;
   log(`turn ${command.angle.toFixed(0)}°: L=${leftSpeed} R=${rightSpeed} ${command.durationMs}ms`);
-  await moveCube.timedMotorPair(leftSpeed, rightSpeed, command.durationMs);
-  await sleep(command.durationMs);
+  await moveCube.timedMotorPair(leftSpeed, rightSpeed, durationMs);
+  await sleep(durationMs);
 }
 
 async function runDeadMotor(command) {
-  const leftSpeed = clamp(command.leftSpeed, -255, 255);
-  const rightSpeed = clamp(command.rightSpeed, -255, 255);
+  const speed = command.speed != null ? command.speed : motorStraightSpeed(command);
+  const leftSpeed = clamp(speed, -255, 255);
+  const rightSpeed = clamp(speed, -255, 255);
   log(`${command.kind}: L=${leftSpeed} R=${rightSpeed} ${command.durationMs}ms`);
   await moveCube.timedMotorPair(leftSpeed, rightSpeed, command.durationMs);
   await sleep(command.durationMs);
@@ -1551,6 +2109,31 @@ function bindEvents() {
   });
 
   els.simulateBtn.addEventListener("click", runSimulation);
+  els.simPauseBtn?.addEventListener("click", toggleSimulationPause);
+  els.simPrevStepBtn?.addEventListener("click", () => stepSimulation(-1));
+  els.simNextStepBtn?.addEventListener("click", () => stepSimulation(1));
+  els.toioCommandOutput?.addEventListener("input", (event) => {
+    if (event.target instanceof HTMLInputElement) updateCommandEdit(event.target, { render: false });
+  });
+  els.toioCommandOutput?.addEventListener("change", (event) => {
+    if (event.target instanceof HTMLInputElement) updateCommandEdit(event.target, { render: true });
+  });
+  els.toioCommandOutput?.addEventListener("click", (event) => {
+    const button = event.target.closest?.("[data-command-step]");
+    if (button) jumpToCommand(Number(button.dataset.commandStep));
+  });
+  els.turnCalibrationOutput?.addEventListener("input", (event) => {
+    if (event.target instanceof HTMLInputElement) updateTurnCalibrationInput(event.target);
+  });
+  els.turnCalibrationOutput?.addEventListener("change", (event) => {
+    if (event.target instanceof HTMLInputElement) finalizeTurnCalibrationInput();
+  });
+  els.turnCalibrationOutput?.addEventListener("click", (event) => {
+    const button = event.target.closest?.("[data-run-turn-test]");
+    if (button) runTurnCalibrationTest(button.dataset.runTurnTest).catch((error) => log(error.message));
+  });
+  els.applyTurnScaleBtn?.addEventListener("click", applyRecommendedTurnScale);
+  els.clearTurnLogBtn?.addEventListener("click", clearTurnCalibrationLog);
   els.runBtn.addEventListener("click", () => runToio());
   els.stopBtn.addEventListener("click", () => emergencyStop());
   els.penUpBtn.addEventListener("click", () => setPen("up").then(() => log("Pen up")).catch((error) => log(error.message)));
@@ -1579,12 +2162,12 @@ function bindEvents() {
     }
   });
   els.swapRolesBtn.addEventListener("click", swapCubeRoles);
-  els.prevSegmentBtn.addEventListener("click", () => selectAdjacentDrawSegment(-1));
-  els.nextSegmentBtn.addEventListener("click", () => selectAdjacentDrawSegment(1));
-  els.deadSegmentsEditor.addEventListener("input", (event) => {
+  els.prevSegmentBtn?.addEventListener("click", () => selectAdjacentDrawSegment(-1));
+  els.nextSegmentBtn?.addEventListener("click", () => selectAdjacentDrawSegment(1));
+  els.deadSegmentsEditor?.addEventListener("input", (event) => {
     if (event.target instanceof HTMLInputElement) updateDeadSegmentSetting(event.target);
   });
-  els.deadSegmentsEditor.addEventListener("change", (event) => {
+  els.deadSegmentsEditor?.addEventListener("change", (event) => {
     if (event.target instanceof HTMLInputElement) updateDeadSegmentSetting(event.target);
   });
 
@@ -1602,6 +2185,7 @@ function init() {
   syncLegendToggle();
   renderDeadSegmentsEditor();
   renderToioCommandOutput();
+  renderTurnCalibration();
   bindEvents();
   window.setInterval(refreshMovePoseStatus, POSITION_UI_REFRESH_MS);
   resizeCanvasBackingStore();

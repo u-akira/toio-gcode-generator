@@ -399,6 +399,85 @@ h2 {
   border-top: 1px solid var(--line);
 }
 
+.turn-calibration-panel {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.turn-calibration-output {
+  display: grid;
+  gap: 8px;
+}
+
+.turn-calibration-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfaf7;
+  color: #43464a;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+}
+
+.turn-test-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfaf7;
+}
+
+.turn-test-main,
+.turn-test-result {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  color: #43464a;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+}
+
+.turn-test-inputs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.turn-test-inputs label {
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.turn-test-inputs input {
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  padding: 3px 5px;
+  border: 1px solid #c9c2b6;
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+}
+
+.turn-test-row > button {
+  align-self: end;
+  min-height: 26px;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
 .toio-command-output {
   max-height: 220px;
   margin: 0;
@@ -411,7 +490,71 @@ h2 {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 11px;
   line-height: 1.45;
-  white-space: pre-wrap;
+}
+
+.command-row {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 7px;
+  border: 1px solid transparent;
+  border-left: 4px solid transparent;
+  border-radius: 6px;
+}
+
+.command-row + .command-row {
+  margin-top: 6px;
+}
+
+.command-row.active {
+  border-color: #f0c36d;
+  border-left-color: #f59e0b;
+  background: #fff8e6;
+  color: #202124;
+}
+
+.command-step-button {
+  min-height: 26px;
+  padding: 3px 0;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.command-main {
+  min-width: 0;
+}
+
+.command-label {
+  overflow-wrap: anywhere;
+}
+
+.command-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.command-fields label {
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 10px;
+}
+
+.command-fields input {
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  padding: 3px 5px;
+  border: 1px solid #c9c2b6;
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
 }
 
 .mini-log {
