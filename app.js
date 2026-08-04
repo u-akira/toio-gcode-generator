@@ -2,6 +2,7 @@
 
 const { MAT, DEFAULT_CONFIG, nativeToMatPose, matToNativePoint } = window.PlotterCore;
 const { ToioCube } = window.ToioBle;
+const { Sb3Exporter } = window;
 
 const COLORS = {
   drawing: "#202124",
@@ -45,6 +46,7 @@ const els = {
   swapRolesBtn: document.getElementById("swapRolesBtn"),
   simulateBtn: document.getElementById("simulateBtn"),
   runBtn: document.getElementById("runBtn"),
+  sb3ExportBtn: document.getElementById("sb3ExportBtn"),
   stopBtn: document.getElementById("stopBtn"),
   penUpBtn: document.getElementById("penUpBtn"),
   penDownBtn: document.getElementById("penDownBtn"),
@@ -254,9 +256,15 @@ function invalidateSimulation(reason) {
   simulationValid = false;
   stopSimulationAnimation();
   els.runBtn.disabled = true;
+  updateSb3ExportButton();
   setPill(els.simStatus, "未シミュレーション", "warn");
   renderToioCommandOutput();
   if (reason) log(reason);
+}
+
+function updateSb3ExportButton() {
+  if (!els.sb3ExportBtn) return;
+  els.sb3ExportBtn.disabled = !simulationValid || !simulation?.commands?.length || !isDeadMode();
 }
 
 function setPill(el, text, cls = "") {
@@ -772,6 +780,7 @@ function runSimulation() {
     }
   }
   if (simulationValid && isDeadMode() && !getSelectedDrawSegment()) selectFirstDeadDrawSegment();
+  updateSb3ExportButton();
   renderDeadSegmentsEditor();
   renderToioCommandOutput();
   if (simulationValid) startSimulationAnimation();
@@ -1801,6 +1810,52 @@ function exportDrawing() {
   URL.revokeObjectURL(url);
 }
 
+async function exportSb3() {
+  if (!isDeadMode()) {
+    log("SB3 Export は Dead reckoning モードのシミュレーション結果だけに対応しています。");
+    return;
+  }
+  if (!simulationValid || !simulation?.commands?.length) {
+    log("SB3 Export の前に Dead reckoning で Simulate してください。");
+    return;
+  }
+  if (!Sb3Exporter) {
+    log("SB3 Export モジュールを読み込めませんでした。");
+    return;
+  }
+
+  els.sb3ExportBtn.disabled = true;
+  try {
+    const response = await fetch(Sb3Exporter.TEMPLATE_URL);
+    if (!response.ok) {
+      throw new Error(`${Sb3Exporter.TEMPLATE_URL} を読み込めませんでした (${response.status})。`);
+    }
+    const templateBytes = new Uint8Array(await response.arrayBuffer());
+    const sb3Bytes = await Sb3Exporter.exportProject({
+      templateBytes,
+      commands: simulation.commands,
+      segments: simulation.segments,
+      mat: MAT,
+      config,
+      turnWheelSpeeds,
+      getPenCommandSpeed,
+      getPenCommandDuration,
+    });
+    const blob = new Blob([sb3Bytes], { type: "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = Sb3Exporter.EXPORT_FILENAME;
+    a.click();
+    URL.revokeObjectURL(url);
+    log(`SB3 Export: ${Sb3Exporter.EXPORT_FILENAME} を作成しました。`);
+  } catch (error) {
+    log(`SB3 Export failed: ${error.message}`);
+  } finally {
+    updateSb3ExportButton();
+  }
+}
+
 async function importDrawing(file) {
   const text = await file.text();
   importDrawingPayload(JSON.parse(text), "描画 JSON を読み込みました");
@@ -2098,6 +2153,7 @@ function bindEvents() {
     draw();
   });
   els.exportBtn.addEventListener("click", exportDrawing);
+  els.sb3ExportBtn?.addEventListener("click", () => exportSb3());
   els.importInput.addEventListener("change", (event) => {
     const [file] = event.target.files;
     if (file) importDrawing(file).catch((error) => log(`Import failed: ${error.message}`));
@@ -2186,6 +2242,7 @@ function init() {
   renderDeadSegmentsEditor();
   renderToioCommandOutput();
   renderTurnCalibration();
+  updateSb3ExportButton();
   bindEvents();
   window.setInterval(refreshMovePoseStatus, POSITION_UI_REFRESH_MS);
   resizeCanvasBackingStore();
