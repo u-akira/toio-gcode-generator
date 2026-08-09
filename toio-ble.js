@@ -21,6 +21,7 @@
       this.onPose = options.onPose || (() => {});
       this.onLog = options.onLog || (() => {});
       this.onPositionMissed = options.onPositionMissed || (() => {});
+      this.onDisconnect = options.onDisconnect || (() => {});
       this.device = null;
       this.server = null;
       this.idChar = null;
@@ -46,7 +47,15 @@
 
       this.device.addEventListener("gattserverdisconnected", () => {
         this.onStatus("切断");
+        this.server = null;
+        this.idChar = null;
+        this.motorChar = null;
         this.pose = null;
+        for (const pending of this.pendingTargets.values()) {
+          pending.reject(new Error(`${this.role} toio disconnected`));
+        }
+        this.pendingTargets.clear();
+        this.onDisconnect();
       });
 
       this.server = await this.device.gatt.connect();
@@ -88,11 +97,13 @@
     }
 
     async write(bytes) {
+      if (!this.isConnected()) throw new Error(`${this.role} toio disconnected`);
       if (!this.motorChar) throw new Error(`${this.role} toio が未接続です。`);
       await this.motorChar.writeValueWithoutResponse(Uint8Array.from(bytes));
     }
 
     async stop() {
+      if (!this.isConnected()) return;
       if (!this.motorChar) return;
       await this.write(buildStopCommand());
     }
@@ -106,6 +117,7 @@
     }
 
     async moveTo(x, y, theta, speed, timeoutSec) {
+      if (!this.isConnected()) throw new Error(`${this.role} toio disconnected`);
       const id = this.nextTargetId;
       this.nextTargetId = (this.nextTargetId + 1) & 0xff;
       const bytes = buildTargetMoveCommand({ id, x, y, theta, speed, timeoutSec });
@@ -129,6 +141,10 @@
 
       await this.motorChar.writeValueWithoutResponse(bytes);
       return promise;
+    }
+
+    isConnected() {
+      return Boolean(this.device?.gatt?.connected && this.motorChar);
     }
   }
 

@@ -25,7 +25,8 @@ const POSITION_RETRY_WAIT_MS = 3000;
 const POSITION_RETRY_POLL_MS = 100;
 const POSITION_TARGET_RETRY_COUNT = 1;
 const POSITION_UI_REFRESH_MS = 300;
-const MIN_TURN_DURATION_MS = 100;
+const MIN_TURN_DURATION_MS = 150;
+const DEAD_TURN_DURATION_BASE_SCALE = 0.5;
 
 const els = {
   canvas: document.getElementById("plotCanvas"),
@@ -101,6 +102,7 @@ const selectConfigInputs = {
 };
 
 const ctx = els.canvas.getContext("2d");
+let resetTurnCalibrationLogOnLoad = true;
 let config = loadConfig();
 let strokes = [];
 let activeStroke = null;
@@ -138,47 +140,83 @@ playMatImage.src = PLAY_MAT_IMAGE_SRC;
 function loadConfig() {
   try {
     const saved = JSON.parse(localStorage.getItem("toioPlotterConfig") || "{}");
+    const savedVersion = saved.configVersion || 0;
+    let changed = false;
     if (!saved.configVersion && saved.penOffsetX === 0 && saved.penOffsetY === 48) {
       saved.penOffsetX = DEFAULT_CONFIG.penOffsetX;
       saved.penOffsetY = DEFAULT_CONFIG.penOffsetY;
+      changed = true;
     }
-    if ((saved.configVersion || 0) < 3) {
+    if (savedVersion < 3) {
       saved.upMotorSpeed = DEFAULT_CONFIG.upMotorSpeed;
       saved.downMotorSpeed = DEFAULT_CONFIG.downMotorSpeed;
       saved.penMotorMode = DEFAULT_CONFIG.penMotorMode;
+      changed = true;
     }
-    if ((saved.configVersion || 0) < 4) {
+    if (savedVersion < 4) {
       saved.travelSpeed = DEFAULT_CONFIG.travelSpeed;
       saved.upMotorSpeed = DEFAULT_CONFIG.upMotorSpeed;
       saved.downMotorSpeed = DEFAULT_CONFIG.downMotorSpeed;
+      changed = true;
     }
-    if ((saved.configVersion || 0) < 5) {
+    if (savedVersion < 5) {
       saved.drawSpeed = DEFAULT_CONFIG.drawSpeed;
       saved.travelSpeed = DEFAULT_CONFIG.travelSpeed;
+      changed = true;
     }
-    if ((saved.configVersion || 0) < 6) {
+    if (savedVersion < 6) {
       saved.upMotorSpeed = DEFAULT_CONFIG.upMotorSpeed;
+      changed = true;
     }
-    if ((saved.configVersion || 0) < 7) {
+    if (savedVersion < 7) {
       saved.upMotorSpeed = DEFAULT_CONFIG.upMotorSpeed;
+      changed = true;
     }
-    if ((saved.configVersion || 0) < 8) {
+    if (savedVersion < 8) {
       saved.runMode = DEFAULT_CONFIG.runMode;
       saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
       saved.deadTurnBalanceTrim = DEFAULT_CONFIG.deadTurnBalanceTrim;
       saved.deadMmPerSecAtDrawSpeed = DEFAULT_CONFIG.deadMmPerSecAtDrawSpeed;
       saved.deadMmPerSecAtTravelSpeed = DEFAULT_CONFIG.deadMmPerSecAtTravelSpeed;
+      changed = true;
     }
-    if ((saved.configVersion || 0) < 11) {
+    if (savedVersion < 11) {
       saved.deadTurnDurationScale = DEFAULT_CONFIG.deadTurnDurationScale;
+      changed = true;
     }
-    if ((saved.configVersion || 0) < 12 && saved.deadTurnSpeed === 30) {
+    if (savedVersion < 12 && saved.deadTurnSpeed === 30) {
       saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
+      changed = true;
     }
-    return { ...DEFAULT_CONFIG, ...saved, configVersion: DEFAULT_CONFIG.configVersion };
+    if (savedVersion < 15 && isLegacyDeadTurnDurationScale(saved.deadTurnDurationScale)) {
+      saved.deadTurnDurationScale = DEFAULT_CONFIG.deadTurnDurationScale;
+      changed = true;
+    }
+    if (savedVersion < 16) {
+      saved.deadMmPerSecAtTravelSpeed = DEFAULT_CONFIG.deadMmPerSecAtTravelSpeed;
+      changed = true;
+    }
+    if (savedVersion < 17) {
+      saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
+      changed = true;
+    }
+    if (saved.deadTurnDurationScale !== DEFAULT_CONFIG.deadTurnDurationScale) {
+      saved.deadTurnDurationScale = DEFAULT_CONFIG.deadTurnDurationScale;
+      changed = true;
+    }
+    const loaded = { ...DEFAULT_CONFIG, ...saved, configVersion: DEFAULT_CONFIG.configVersion };
+    if (changed || saved.configVersion !== DEFAULT_CONFIG.configVersion) {
+      localStorage.setItem("toioPlotterConfig", JSON.stringify(loaded));
+    }
+    return loaded;
   } catch {
     return { ...DEFAULT_CONFIG };
   }
+}
+
+function isLegacyDeadTurnDurationScale(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && Math.abs(number - DEAD_TURN_DURATION_BASE_SCALE) < 0.005;
 }
 
 function saveConfig() {
@@ -198,6 +236,10 @@ function saveDeadSegmentSettings() {
 }
 
 function loadTurnCalibrationLog() {
+  if (resetTurnCalibrationLogOnLoad) {
+    localStorage.removeItem("toioPlotterTurnCalibrationLog");
+    return {};
+  }
   try {
     return JSON.parse(localStorage.getItem("toioPlotterTurnCalibrationLog") || "{}");
   } catch {
@@ -265,6 +307,24 @@ function invalidateSimulation(reason) {
 function updateSb3ExportButton() {
   if (!els.sb3ExportBtn) return;
   els.sb3ExportBtn.disabled = !simulationValid || !simulation?.commands?.length || !isDeadMode();
+}
+
+function syncRunButton() {
+  els.runBtn.disabled = running || !simulationValid || !hasRequiredToioConnection();
+}
+
+function hasRequiredToioConnection() {
+  return isCubeConnected(moveCube) && isCubeConnected(penCube);
+}
+
+function isCubeConnected(cube) {
+  return Boolean(cube?.isConnected?.());
+}
+
+function setConnectionState(el, state, text) {
+  el.textContent = text;
+  el.classList.remove("connected", "disconnected", "connecting");
+  if (state) el.classList.add(state);
 }
 
 function setPill(el, text, cls = "") {
@@ -750,18 +810,18 @@ function runSimulation() {
   if (!simulation.commands.length) {
     simulationValid = false;
     selectedDeadSegmentId = null;
-    els.runBtn.disabled = true;
+    syncRunButton();
     setPill(els.simStatus, "線なし", "warn");
     log("描画線がありません。");
   } else if (simulation.errors.length) {
     simulationValid = false;
     selectedDeadSegmentId = null;
-    els.runBtn.disabled = true;
+    syncRunButton();
     setPill(els.simStatus, "失敗", "error");
     log(`シミュレーション失敗:\n${simulation.errors.join("\n")}`);
   } else {
     simulationValid = true;
-    els.runBtn.disabled = false;
+    syncRunButton();
     setPill(els.simStatus, "成功", "ok");
     const warn = simulation.warnings.length ? `\n警告: ${simulation.warnings.join(" ")}` : "";
     const stats = simulation.stats;
@@ -1352,7 +1412,7 @@ function turnStartThetaAtCommand(index, command) {
 
 function manualTurnAngle(command) {
   const speeds = turnWheelSpeeds(command);
-  const calibratedScale = Math.max(0.1, Math.abs(config.deadTurnDurationScale || 1));
+  const calibratedScale = effectiveTurnDurationScale(config.deadTurnDurationScale);
   const angularSpeedDegPerSec = (((speeds.left - speeds.right) / 2) * 4) / calibratedScale;
   return angularSpeedDegPerSec * ((command.durationMs || 0) / 1000);
 }
@@ -1423,28 +1483,13 @@ function formatPositionToioCommand(command) {
 }
 
 function turnWheelSpeeds(command) {
-  if (command.manualWheelSpeeds) {
+  if (command.leftSpeed != null || command.rightSpeed != null) {
     return {
       left: Math.round(clamp(command.leftSpeed || 0, -255, 255)),
       right: Math.round(clamp(command.rightSpeed || 0, -255, 255)),
     };
   }
-  const direction = command.angle >= 0 ? 1 : -1;
-  const base = turnBaseSpeedForCommand(command);
-  const trim = config.deadTurnBalanceTrim;
-  return {
-    left: Math.round(direction * clamp(base + trim, 0, 255)),
-    right: Math.round(-direction * clamp(base - trim, 0, 255)),
-  };
-}
-
-function turnBaseSpeedForCommand(command) {
-  if (command.durationMs && Math.abs(command.angle || 0) > 0.1) {
-    const calibratedScale = Math.max(0.1, Math.abs(config.deadTurnDurationScale || 1));
-    const effectiveMs = Math.max(MIN_TURN_DURATION_MS, command.durationMs);
-    return clamp((Math.abs(command.angle) * calibratedScale * 1000) / (4 * effectiveMs), 0, Math.abs(config.deadTurnSpeed));
-  }
-  return Math.abs(config.deadTurnSpeed);
+  return window.PlotterCore.computeTurnWheelSpeeds(command.angle || 0, config.deadTurnSpeed, config.deadTurnBalanceTrim);
 }
 
 function escapeHtml(value) {
@@ -1510,7 +1555,11 @@ function turnRunInputTemplate(testId, runIndex, value) {
 
 function turnTestDurationMs(targetAngle) {
   const degPerSec = Math.max(10, Math.abs(config.deadTurnSpeed) * 4);
-  return Math.max(MIN_TURN_DURATION_MS, Math.round((Math.abs(targetAngle) / degPerSec) * 1000 * (config.deadTurnDurationScale || 1)));
+  return Math.max(MIN_TURN_DURATION_MS, Math.round((Math.abs(targetAngle) / degPerSec) * 1000 * effectiveTurnDurationScale(config.deadTurnDurationScale)));
+}
+
+function effectiveTurnDurationScale(turnDurationScale) {
+  return Math.max(0.1, Math.abs(Number(turnDurationScale) || 1)) * DEAD_TURN_DURATION_BASE_SCALE;
 }
 
 function turnCalibrationStats(test, entry) {
@@ -1529,7 +1578,7 @@ function recommendedTurnScale() {
     const stats = turnCalibrationStats(test, turnCalibrationLog[test.id] || {});
     if (stats.scale != null && (stats.range == null || stats.range <= 15)) scales.push(stats.scale);
   }
-  if (!scales.length) return null;
+  if (!scales.length) return DEFAULT_CONFIG.deadTurnDurationScale;
   return scales.reduce((sum, value) => sum + value, 0) / scales.length;
 }
 
@@ -1561,8 +1610,14 @@ function applyRecommendedTurnScale() {
 
 function clearTurnCalibrationLog() {
   turnCalibrationLog = {};
-  saveTurnCalibrationLog();
+  localStorage.removeItem("toioPlotterTurnCalibrationLog");
+  config.deadTurnDurationScale = DEFAULT_CONFIG.deadTurnDurationScale;
+  saveConfig();
+  syncConfigToForm();
+  simulation = null;
+  invalidateSimulation("回転テストログと回転倍率をリセットしました");
   renderTurnCalibration();
+  draw();
 }
 
 async function runTurnCalibrationTest(testId) {
@@ -1651,7 +1706,7 @@ function updateDeadSegmentSetting(input) {
   if (!getSelectedDrawSegment()) selectFirstDeadDrawSegment();
   const hasErrors = simulation.errors.length > 0;
   simulationValid = !hasErrors && simulation.commands.length > 0;
-  els.runBtn.disabled = !simulationValid;
+  syncRunButton();
   setPill(els.simStatus, simulationValid ? "成功" : "失敗", simulationValid ? "ok" : "error");
   if (hasErrors) log(`線分調整エラー:\n${simulation.errors.join("\n")}`);
   renderDeadSegmentsEditor();
@@ -1709,7 +1764,7 @@ async function runToio() {
     await emergencyStop();
   } finally {
     running = false;
-    els.runBtn.disabled = !simulationValid;
+    syncRunButton();
   }
 }
 
@@ -1952,6 +2007,25 @@ function connectedName(cube) {
   return cube?.device?.name || "未接続";
 }
 
+function handleCubeDisconnected(role) {
+  if (role === "move") {
+    lastMovePose = null;
+    lastMovePoseAt = 0;
+    lastMovePoseState = "missed";
+    setConnectionState(els.moveCubeState, "disconnected", "切断");
+    els.positionState.textContent = "Position ID missed";
+  } else {
+    setConnectionState(els.penCubeState, "disconnected", "切断");
+  }
+  abortRun = true;
+  if (running) {
+    void emergencyStop().finally(() => setPill(els.runStatus, "toio切断", "error"));
+  }
+  syncRunButton();
+  setPill(els.runStatus, "toio切断", "error");
+  log(`${role === "move" ? "移動用" : "昇降用"} toio が切断されました`);
+}
+
 function getMovePoseStatus(now = Date.now()) {
   if (!lastMovePose) return { state: "missed", pose: null, ageMs: Infinity };
   const ageMs = now - lastMovePoseAt;
@@ -2032,19 +2106,36 @@ async function runDeadReckoningToio() {
     await emergencyStop();
   } finally {
     running = false;
-    els.runBtn.disabled = !simulationValid;
+    syncRunButton();
   }
 }
 
 async function runDeadTurn(command) {
   if (!command.durationMs) return;
-  const durationMs = Math.max(MIN_TURN_DURATION_MS, command.durationMs);
+  const durationMs = deadTurnDurationMsForRun(command);
   const speeds = turnWheelSpeeds(command);
   const leftSpeed = speeds.left;
   const rightSpeed = speeds.right;
-  log(`turn ${command.angle.toFixed(0)}°: L=${leftSpeed} R=${rightSpeed} ${command.durationMs}ms`);
+  log(`turn ${command.angle.toFixed(0)}°: L=${leftSpeed} R=${rightSpeed} ${durationMs}ms`);
+  if (durationMs !== command.durationMs && !command.manualWheelSpeeds) {
+    command.durationMs = durationMs;
+    renderToioCommandOutput();
+  }
   await moveCube.timedMotorPair(leftSpeed, rightSpeed, durationMs);
   await sleep(durationMs);
+}
+
+function deadTurnDurationMsForRun(command) {
+  const durationMs = Math.max(MIN_TURN_DURATION_MS, command.durationMs || 0);
+  if (command.manualWheelSpeeds) return durationMs;
+  if (command.turnDurationBaseScale === DEAD_TURN_DURATION_BASE_SCALE) return durationMs;
+  return plannedTurnDurationMs(command.angle || 0, command.turnDurationScale ?? config.deadTurnDurationScale);
+}
+
+function plannedTurnDurationMs(angleDeg, turnDurationScale) {
+  if (Math.abs(angleDeg) < 0.1) return 0;
+  const degPerSec = Math.max(10, Math.abs(config.deadTurnSpeed) * 4);
+  return Math.max(MIN_TURN_DURATION_MS, Math.round((Math.abs(angleDeg) / degPerSec) * 1000 * effectiveTurnDurationScale(turnDurationScale)));
 }
 
 async function runDeadMotor(command) {
@@ -2082,8 +2173,10 @@ function setMoveCube(cube) {
   }
   cube.role = "移動用";
   cube.onStatus = (status) => {
-    els.moveCubeState.textContent = status;
+    setConnectionState(els.moveCubeState, isCubeConnected(cube) ? "connected" : "connecting", status);
+    syncRunButton();
   };
+  cube.onDisconnect = () => handleCubeDisconnected("move");
   cube.onPose = (pose) => {
     lastMovePose = pose;
     lastMovePoseAt = Date.now();
@@ -2093,7 +2186,8 @@ function setMoveCube(cube) {
     updateMovePoseUi();
   };
   cube.onLog = log;
-  els.moveCubeState.textContent = connectedName(cube);
+  setConnectionState(els.moveCubeState, isCubeConnected(cube) ? "connected" : "connecting", connectedName(cube));
+  syncRunButton();
   if (cube.pose) {
     lastMovePose = cube.pose;
     lastMovePoseAt = Date.now();
@@ -2109,12 +2203,15 @@ function setPenCube(cube) {
   }
   cube.role = "昇降用";
   cube.onStatus = (status) => {
-    els.penCubeState.textContent = status;
+    setConnectionState(els.penCubeState, isCubeConnected(cube) ? "connected" : "connecting", status);
+    syncRunButton();
   };
+  cube.onDisconnect = () => handleCubeDisconnected("pen");
   cube.onPose = () => {};
   cube.onPositionMissed = () => {};
   cube.onLog = log;
-  els.penCubeState.textContent = connectedName(cube);
+  setConnectionState(els.penCubeState, isCubeConnected(cube) ? "connected" : "connecting", connectedName(cube));
+  syncRunButton();
 }
 
 function swapCubeRoles() {
@@ -2202,7 +2299,7 @@ function bindEvents() {
       setMoveCube(cube);
       await cube.connect();
     } catch (error) {
-      if (cube && !cube.device) setMoveCube(null);
+      if (cube && !cube.isConnected?.()) setMoveCube(null);
       log(error.message);
     }
   });
@@ -2213,7 +2310,7 @@ function bindEvents() {
       setPenCube(cube);
       await cube.connect();
     } catch (error) {
-      if (cube && !cube.device) setPenCube(null);
+      if (cube && !cube.isConnected?.()) setPenCube(null);
       log(error.message);
     }
   });

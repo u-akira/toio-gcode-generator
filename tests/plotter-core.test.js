@@ -21,7 +21,15 @@ function simulate(stroke, config = {}) {
 }
 
 test("default dead reckoning turn speed is conservative for calibration", () => {
-  assert.equal(core.DEFAULT_CONFIG.deadTurnSpeed, 20);
+  assert.equal(core.DEFAULT_CONFIG.deadTurnSpeed, 15);
+});
+
+test("default dead reckoning turn duration scale is neutral", () => {
+  assert.equal(core.DEFAULT_CONFIG.deadTurnDurationScale, 1);
+});
+
+test("default dead reckoning turn duration uses calibrated base scale", () => {
+  assert.equal(core.effectiveTurnDurationScale(core.DEFAULT_CONFIG.deadTurnDurationScale), 0.5);
 });
 
 test("pen front/back offset changes simulated cube path", () => {
@@ -217,6 +225,59 @@ test("dead reckoning global turn duration scale affects turn commands", () => {
   assert.ok(scaledTurn.durationMs < baseTurn.durationMs);
 });
 
+test("dead reckoning default turn duration uses calibrated base", () => {
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnSpeed: 15, deadTurnDurationScale: 1 })).plan([
+    makeStroke([
+      [190, 250],
+      [250, 250],
+      [250, 310],
+    ]),
+  ]);
+  const turn = result.commands.find((command) => command.type === "turn" && Math.abs(command.angle) > 1);
+
+  assert.ok(turn);
+  const calibratedMs = Math.round((Math.abs(turn.angle) / (15 * 4)) * 1000 * 0.5);
+  assert.equal(turn.durationMs, calibratedMs);
+});
+
+test("dead reckoning turn commands keep planned wheel speeds", () => {
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnSpeed: 15, deadTurnBalanceTrim: 0 })).plan([
+    makeStroke([
+      [190, 250],
+      [250, 250],
+      [250, 310],
+    ]),
+  ]);
+  const turn = result.commands.find((command) => command.type === "turn" && Math.abs(command.angle) > 1);
+
+  assert.ok(turn);
+  assert.equal(turn.leftSpeed, 15);
+  assert.equal(turn.rightSpeed, -15);
+});
+
+test("dead reckoning turn duration scale remains relative to the calibrated base", () => {
+  const base = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnSpeed: 20, deadTurnDurationScale: 1 })).plan([
+    makeStroke([
+      [190, 250],
+      [250, 250],
+      [250, 310],
+    ]),
+  ]);
+  const doubled = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnSpeed: 20, deadTurnDurationScale: 2 })).plan([
+    makeStroke([
+      [190, 250],
+      [250, 250],
+      [250, 310],
+    ]),
+  ]);
+  const baseTurn = base.commands.find((command) => command.type === "turn" && Math.abs(command.angle) > 1);
+  const doubledTurn = doubled.commands.find((command) => command.type === "turn" && Math.abs(command.angle) > 1);
+
+  assert.ok(baseTurn);
+  assert.ok(doubledTurn);
+  assert.equal(doubledTurn.durationMs, baseTurn.durationMs * 2);
+});
+
 test("dead reckoning turn commands keep a practical minimum duration", () => {
   const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnSpeed: 20, deadTurnDurationScale: 0.33 })).plan([
     makeStroke([
@@ -228,7 +289,7 @@ test("dead reckoning turn commands keep a practical minimum duration", () => {
   const smallTurn = result.commands.find((command) => command.type === "turn" && Math.abs(command.angle) > 1);
 
   assert.ok(smallTurn);
-  assert.ok(smallTurn.durationMs >= 100);
+  assert.ok(smallTurn.durationMs >= 150);
 });
 
 test("signed angle delta returns the shortest turn", () => {

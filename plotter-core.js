@@ -16,7 +16,7 @@
 
   const NATIVE_MAT = { ...MAT };
   const DEFAULT_CONFIG = {
-    configVersion: 12,
+    configVersion: 17,
     safeScale: 0.75,
     fixedHeading: 0,
     penOffsetX: -48,
@@ -39,13 +39,14 @@
     penMotorMode: 0,
     settleMs: 250,
     runMode: "position",
-    deadTurnSpeed: 20,
+    deadTurnSpeed: 15,
     deadTurnBalanceTrim: 0,
     deadTurnDurationScale: 1,
     deadMmPerSecAtDrawSpeed: 30,
-    deadMmPerSecAtTravelSpeed: 35,
+    deadMmPerSecAtTravelSpeed: 70,
   };
-  const MIN_TURN_DURATION_MS = 100;
+  const MIN_TURN_DURATION_MS = 150;
+  const DEAD_TURN_DURATION_BASE_SCALE = 0.5;
 
   function withDefaults(config = {}) {
     return { ...DEFAULT_CONFIG, ...config, configVersion: DEFAULT_CONFIG.configVersion };
@@ -370,11 +371,16 @@
       const angle = signedAngleDelta(pose.theta, theta);
       const turnDurationScale = segment.turnDurationScale;
       const durationMs = computeTurnDurationMs(angle, this.config.deadTurnSpeed, turnDurationScale);
+      const speeds = computeTurnWheelSpeeds(angle, this.config.deadTurnSpeed, this.config.deadTurnBalanceTrim);
       plan.commands.push({
         type: "turn",
         role: label,
         segmentId: segment.id,
         angle,
+        leftSpeed: speeds.left,
+        rightSpeed: speeds.right,
+        turnDurationScale,
+        turnDurationBaseScale: DEAD_TURN_DURATION_BASE_SCALE,
         durationMs,
         x: pose.x,
         y: pose.y,
@@ -428,7 +434,21 @@
   function computeTurnDurationMs(angleDeg, turnSpeed, turnDurationScale) {
     if (Math.abs(angleDeg) < 0.1) return 0;
     const degPerSec = Math.max(10, Math.abs(turnSpeed) * 4);
-    return Math.max(MIN_TURN_DURATION_MS, Math.round((Math.abs(angleDeg) / degPerSec) * 1000 * turnDurationScale));
+    return Math.max(MIN_TURN_DURATION_MS, Math.round((Math.abs(angleDeg) / degPerSec) * 1000 * effectiveTurnDurationScale(turnDurationScale)));
+  }
+
+  function effectiveTurnDurationScale(turnDurationScale) {
+    return Math.max(0.1, Math.abs(Number(turnDurationScale) || 1)) * DEAD_TURN_DURATION_BASE_SCALE;
+  }
+
+  function computeTurnWheelSpeeds(angleDeg, turnSpeed, balanceTrim) {
+    const direction = angleDeg >= 0 ? 1 : -1;
+    const base = Math.abs(Number(turnSpeed) || 0);
+    const trim = Number(balanceTrim) || 0;
+    return {
+      left: Math.round(direction * clamp(base + trim, 0, 255)),
+      right: Math.round(-direction * clamp(base - trim, 0, 255)),
+    };
   }
 
   function cubeToPen(point, theta, configInput = {}) {
@@ -617,6 +637,8 @@
     PositionIdPlanner,
     DeadReckoningPlanner,
     processStroke,
+    effectiveTurnDurationScale,
+    computeTurnWheelSpeeds,
     createSimulation,
     createDeadReckoningSimulation,
     penToCube,
