@@ -200,10 +200,6 @@ function loadConfig() {
       saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
       changed = true;
     }
-    if (saved.deadTurnDurationScale !== DEFAULT_CONFIG.deadTurnDurationScale) {
-      saved.deadTurnDurationScale = DEFAULT_CONFIG.deadTurnDurationScale;
-      changed = true;
-    }
     const loaded = { ...DEFAULT_CONFIG, ...saved, configVersion: DEFAULT_CONFIG.configVersion };
     if (changed || saved.configVersion !== DEFAULT_CONFIG.configVersion) {
       localStorage.setItem("toioPlotterConfig", JSON.stringify(loaded));
