@@ -1836,15 +1836,15 @@ function exportDrawing() {
 
 async function exportSb3() {
   if (!isDeadMode()) {
-    log("SB3 Export は Dead reckoning モードのシミュレーション結果だけに対応しています。");
+    log("toio do export は Dead reckoning モードのシミュレーション結果だけに対応しています。");
     return;
   }
   if (!simulationValid || !simulation?.commands?.length) {
-    log("SB3 Export の前に Dead reckoning で Simulate してください。");
+    log("toio do export の前に Dead reckoning で Simulate してください。");
     return;
   }
   if (!Sb3Exporter) {
-    log("SB3 Export モジュールを読み込めませんでした。");
+    log("toio do export モジュールを読み込めませんでした。");
     return;
   }
 
@@ -1872,9 +1872,9 @@ async function exportSb3() {
     a.download = Sb3Exporter.EXPORT_FILENAME;
     a.click();
     URL.revokeObjectURL(url);
-    log(`SB3 Export: ${Sb3Exporter.EXPORT_FILENAME} を作成しました。`);
+    log(`toio do export: ${Sb3Exporter.EXPORT_FILENAME} を作成しました。`);
   } catch (error) {
-    log(`SB3 Export failed: ${error.message}`);
+    log(`toio do export failed: ${error.message}`);
   } finally {
     updateSb3ExportButton();
   }
