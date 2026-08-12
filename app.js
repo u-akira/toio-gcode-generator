@@ -1321,7 +1321,11 @@ function updateCommandEdit(input, { render = true } = {}) {
     command.leftSpeed = speeds.left;
     command.rightSpeed = speeds.right;
   }
-  const value = command.type === "turn" && key === "durationMs" ? Math.max(MIN_TURN_DURATION_MS, Number(input.value)) : Number(input.value);
+  let value = Number(input.value);
+  if ((command.type === "turn" || command.type === "motor") && key === "durationMs") {
+    const minMs = command.type === "turn" ? MIN_TURN_DURATION_MS : 10;
+    value = roundToMotorDurationMs(Math.max(minMs, value));
+  }
   command[key] = value;
   if (command.type === "motor" && (key === "speed" || key === "durationMs")) {
     command.leftSpeed = command.speed;

@@ -422,7 +422,7 @@
 
   function computeStraightDurationMs(lengthMm, speed, baseSpeed, baseMmPerSec, durationScale) {
     const mmPerSec = Math.max(1, baseMmPerSec * (speed / Math.max(1, baseSpeed)));
-    return Math.max(10, Math.round((lengthMm / mmPerSec) * 1000 * durationScale));
+    return roundToMotorDurationMs(Math.max(10, (lengthMm / mmPerSec) * 1000 * durationScale));
   }
 
   function computeTurnDurationMs(angleDeg, configInput = {}) {

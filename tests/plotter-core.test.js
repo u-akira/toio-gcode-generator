@@ -156,6 +156,19 @@ test("dead reckoning motor commands include cube start and end centers", () => {
   assert.equal(motor.y, segment.endCube.y);
 });
 
+test("dead reckoning straight motor durations use 10ms steps", () => {
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadMmPerSecAtDrawSpeed: 37 })).plan([
+    makeStroke([
+      [190, 250],
+      [240, 250],
+    ]),
+  ]);
+  const motor = result.commands.find((command) => command.type === "motor" && command.kind === "draw");
+
+  assert.ok(motor);
+  assert.equal(motor.durationMs % 10, 0);
+});
+
 test("dead reckoning inserts travel between separate strokes", () => {
   const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0 })).plan([
       makeStroke([
