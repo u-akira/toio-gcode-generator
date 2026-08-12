@@ -26,7 +26,6 @@ const POSITION_RETRY_POLL_MS = 100;
 const POSITION_TARGET_RETRY_COUNT = 1;
 const POSITION_UI_REFRESH_MS = 300;
 const MIN_TURN_DURATION_MS = 150;
-const DEAD_TURN_DURATION_BASE_SCALE = 0.5;
 
 const els = {
   canvas: document.getElementById("plotCanvas"),
@@ -75,6 +74,7 @@ const configInputs = [
   "travelSpeed",
   "deadTurnSpeed",
   "deadTurnBalanceTrim",
+  "deadTurnMsPer90",
   "deadMmPerSecAtDrawSpeed",
   "deadMmPerSecAtTravelSpeed",
   "smoothing",
@@ -189,12 +189,16 @@ function loadConfig() {
       saved.deadMmPerSecAtTravelSpeed = DEFAULT_CONFIG.deadMmPerSecAtTravelSpeed;
       changed = true;
     }
-    if (savedVersion < 17) {
+    if (savedVersion < 24) {
       saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
       changed = true;
     }
     if (Object.prototype.hasOwnProperty.call(saved, "deadTurnDurationScale")) {
       delete saved.deadTurnDurationScale;
+      changed = true;
+    }
+    if (savedVersion < 24) {
+      saved.deadTurnMsPer90 = DEFAULT_CONFIG.deadTurnMsPer90;
       changed = true;
     }
     const loaded = { ...DEFAULT_CONFIG, ...saved, configVersion: DEFAULT_CONFIG.configVersion };
@@ -1405,8 +1409,9 @@ function turnStartThetaAtCommand(index, command) {
 
 function manualTurnAngle(command) {
   const speeds = turnWheelSpeeds(command);
-  const calibratedScale = effectiveTurnDurationScale();
-  const angularSpeedDegPerSec = (((speeds.left - speeds.right) / 2) * 4) / calibratedScale;
+  const direction = speeds.left - speeds.right >= 0 ? 1 : -1;
+  const speedRatio = Math.abs((speeds.left - speeds.right) / 2) / Math.max(1, Math.abs(config.deadTurnSpeed));
+  const angularSpeedDegPerSec = (90 / (turnMsPer90() / 1000)) * speedRatio * direction;
   return angularSpeedDegPerSec * ((command.durationMs || 0) / 1000);
 }
 
@@ -1540,12 +1545,11 @@ function turnRunInputTemplate(testId, runIndex, value) {
 }
 
 function turnTestDurationMs(targetAngle) {
-  const degPerSec = Math.max(10, Math.abs(config.deadTurnSpeed) * 4);
-  return Math.max(MIN_TURN_DURATION_MS, Math.round((Math.abs(targetAngle) / degPerSec) * 1000 * effectiveTurnDurationScale()));
+  return plannedTurnDurationMs(targetAngle);
 }
 
-function effectiveTurnDurationScale() {
-  return DEAD_TURN_DURATION_BASE_SCALE;
+function turnMsPer90() {
+  return Math.max(MIN_TURN_DURATION_MS, Number(config.deadTurnMsPer90) || DEFAULT_CONFIG.deadTurnMsPer90);
 }
 
 function turnCalibrationStats(test, entry) {
@@ -2089,14 +2093,16 @@ async function runDeadTurn(command) {
 function deadTurnDurationMsForRun(command) {
   const durationMs = Math.max(MIN_TURN_DURATION_MS, command.durationMs || 0);
   if (command.manualWheelSpeeds) return durationMs;
-  if (command.turnDurationBaseScale === DEAD_TURN_DURATION_BASE_SCALE) return durationMs;
   return plannedTurnDurationMs(command.angle || 0);
 }
 
 function plannedTurnDurationMs(angleDeg) {
   if (Math.abs(angleDeg) < 0.1) return 0;
-  const degPerSec = Math.max(10, Math.abs(config.deadTurnSpeed) * 4);
-  return Math.max(MIN_TURN_DURATION_MS, Math.round((Math.abs(angleDeg) / degPerSec) * 1000 * effectiveTurnDurationScale()));
+  return roundToMotorDurationMs(Math.max(MIN_TURN_DURATION_MS, (Math.abs(angleDeg) / 90) * turnMsPer90()));
+}
+
+function roundToMotorDurationMs(durationMs) {
+  return clamp(Math.round(durationMs / 10), 1, 255) * 10;
 }
 
 async function runDeadMotor(command) {
