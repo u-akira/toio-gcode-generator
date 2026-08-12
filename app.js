@@ -103,6 +103,7 @@ const selectConfigInputs = {
 
 const ctx = els.canvas.getContext("2d");
 let resetTurnCalibrationLogOnLoad = true;
+let resetLegacyDeadSegmentTurnScales = false;
 let config = loadConfig();
 let strokes = [];
 let activeStroke = null;
@@ -200,6 +201,11 @@ function loadConfig() {
       saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
       changed = true;
     }
+    if (savedVersion < 18) {
+      saved.deadTurnDurationScale = DEFAULT_CONFIG.deadTurnDurationScale;
+      resetLegacyDeadSegmentTurnScales = true;
+      changed = true;
+    }
     const loaded = { ...DEFAULT_CONFIG, ...saved, configVersion: DEFAULT_CONFIG.configVersion };
     if (changed || saved.configVersion !== DEFAULT_CONFIG.configVersion) {
       localStorage.setItem("toioPlotterConfig", JSON.stringify(loaded));
@@ -221,7 +227,18 @@ function saveConfig() {
 
 function loadDeadSegmentSettings() {
   try {
-    return JSON.parse(localStorage.getItem("toioPlotterDeadSegmentSettings") || "{}");
+    const settings = JSON.parse(localStorage.getItem("toioPlotterDeadSegmentSettings") || "{}");
+    if (resetLegacyDeadSegmentTurnScales) {
+      let changed = false;
+      for (const setting of Object.values(settings)) {
+        if (setting && Object.prototype.hasOwnProperty.call(setting, "turnDurationScale")) {
+          delete setting.turnDurationScale;
+          changed = true;
+        }
+      }
+      if (changed) localStorage.setItem("toioPlotterDeadSegmentSettings", JSON.stringify(settings));
+    }
+    return settings;
   } catch {
     return {};
   }
