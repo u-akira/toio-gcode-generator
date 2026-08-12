@@ -61,7 +61,6 @@ const els = {
   simPrevStepBtn: document.getElementById("simPrevStepBtn"),
   simNextStepBtn: document.getElementById("simNextStepBtn"),
   turnCalibrationOutput: document.getElementById("turnCalibrationOutput"),
-  applyTurnScaleBtn: document.getElementById("applyTurnScaleBtn"),
   clearTurnLogBtn: document.getElementById("clearTurnLogBtn"),
 };
 
@@ -76,7 +75,6 @@ const configInputs = [
   "travelSpeed",
   "deadTurnSpeed",
   "deadTurnBalanceTrim",
-  "deadTurnDurationScale",
   "deadMmPerSecAtDrawSpeed",
   "deadMmPerSecAtTravelSpeed",
   "smoothing",
@@ -103,7 +101,6 @@ const selectConfigInputs = {
 
 const ctx = els.canvas.getContext("2d");
 let resetTurnCalibrationLogOnLoad = true;
-let resetLegacyDeadSegmentTurnScales = false;
 let config = loadConfig();
 let strokes = [];
 let activeStroke = null;
@@ -182,15 +179,10 @@ function loadConfig() {
       changed = true;
     }
     if (savedVersion < 11) {
-      saved.deadTurnDurationScale = DEFAULT_CONFIG.deadTurnDurationScale;
       changed = true;
     }
     if (savedVersion < 12 && saved.deadTurnSpeed === 30) {
       saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
-      changed = true;
-    }
-    if (savedVersion < 15 && isLegacyDeadTurnDurationScale(saved.deadTurnDurationScale)) {
-      saved.deadTurnDurationScale = DEFAULT_CONFIG.deadTurnDurationScale;
       changed = true;
     }
     if (savedVersion < 16) {
@@ -201,9 +193,8 @@ function loadConfig() {
       saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
       changed = true;
     }
-    if (savedVersion < 18) {
-      saved.deadTurnDurationScale = DEFAULT_CONFIG.deadTurnDurationScale;
-      resetLegacyDeadSegmentTurnScales = true;
+    if (Object.prototype.hasOwnProperty.call(saved, "deadTurnDurationScale")) {
+      delete saved.deadTurnDurationScale;
       changed = true;
     }
     const loaded = { ...DEFAULT_CONFIG, ...saved, configVersion: DEFAULT_CONFIG.configVersion };
@@ -216,11 +207,6 @@ function loadConfig() {
   }
 }
 
-function isLegacyDeadTurnDurationScale(value) {
-  const number = Number(value);
-  return Number.isFinite(number) && Math.abs(number - DEAD_TURN_DURATION_BASE_SCALE) < 0.005;
-}
-
 function saveConfig() {
   localStorage.setItem("toioPlotterConfig", JSON.stringify(config));
 }
@@ -228,16 +214,14 @@ function saveConfig() {
 function loadDeadSegmentSettings() {
   try {
     const settings = JSON.parse(localStorage.getItem("toioPlotterDeadSegmentSettings") || "{}");
-    if (resetLegacyDeadSegmentTurnScales) {
-      let changed = false;
-      for (const setting of Object.values(settings)) {
-        if (setting && Object.prototype.hasOwnProperty.call(setting, "turnDurationScale")) {
-          delete setting.turnDurationScale;
-          changed = true;
-        }
+    let changed = false;
+    for (const setting of Object.values(settings)) {
+      if (setting && Object.prototype.hasOwnProperty.call(setting, "turnDurationScale")) {
+        delete setting.turnDurationScale;
+        changed = true;
       }
-      if (changed) localStorage.setItem("toioPlotterDeadSegmentSettings", JSON.stringify(settings));
     }
+    if (changed) localStorage.setItem("toioPlotterDeadSegmentSettings", JSON.stringify(settings));
     return settings;
   } catch {
     return {};
@@ -1128,10 +1112,6 @@ function renderDeadSegmentsEditor() {
         ${segmentInputTemplate(segment.id, "durationScale", "時間倍率", segment.durationScale, 0.05)}
         ${segmentInputTemplate(segment.id, "steeringTrim", "直進補正", segment.steeringTrim, 1)}
       </div>
-      <div class="segment-meta">描画前の向き合わせ</div>
-      <div class="segment-fields">
-        ${segmentInputTemplate(segment.id, "turnDurationScale", "回転倍率", segment.turnDurationScale, 0.05)}
-      </div>
     </div>
   `;
 }
@@ -1425,7 +1405,7 @@ function turnStartThetaAtCommand(index, command) {
 
 function manualTurnAngle(command) {
   const speeds = turnWheelSpeeds(command);
-  const calibratedScale = effectiveTurnDurationScale(config.deadTurnDurationScale);
+  const calibratedScale = effectiveTurnDurationScale();
   const angularSpeedDegPerSec = (((speeds.left - speeds.right) / 2) * 4) / calibratedScale;
   return angularSpeedDegPerSec * ((command.durationMs || 0) / 1000);
 }
@@ -1522,15 +1502,9 @@ const TURN_CALIBRATION_TESTS = [
 function renderTurnCalibration() {
   if (!els.turnCalibrationOutput) return;
   const rows = TURN_CALIBRATION_TESTS.map((test) => turnCalibrationRowTemplate(test)).join("");
-  const recommended = recommendedTurnScale();
   els.turnCalibrationOutput.innerHTML = `
-    <div class="turn-calibration-summary">
-      <span>recommended: ${recommended == null ? "--" : recommended.toFixed(2)}</span>
-      <span>current: ${Number(config.deadTurnDurationScale || 1).toFixed(2)}</span>
-    </div>
     ${rows}
   `;
-  if (els.applyTurnScaleBtn) els.applyTurnScaleBtn.disabled = recommended == null;
 }
 
 function turnCalibrationRowTemplate(test) {
@@ -1554,7 +1528,6 @@ function turnCalibrationRowTemplate(test) {
       <div class="turn-test-result">
         <span>avg:${stats.avg == null ? "--" : stats.avg.toFixed(1)}</span>
         <span>range:${stats.range == null ? "--" : stats.range.toFixed(1)}</span>
-        <span>scale:${stats.scale == null ? "--" : stats.scale.toFixed(2)}</span>
       </div>
       <button type="button" data-run-turn-test="${test.id}">Run</button>
     </div>
@@ -1568,11 +1541,11 @@ function turnRunInputTemplate(testId, runIndex, value) {
 
 function turnTestDurationMs(targetAngle) {
   const degPerSec = Math.max(10, Math.abs(config.deadTurnSpeed) * 4);
-  return Math.max(MIN_TURN_DURATION_MS, Math.round((Math.abs(targetAngle) / degPerSec) * 1000 * effectiveTurnDurationScale(config.deadTurnDurationScale)));
+  return Math.max(MIN_TURN_DURATION_MS, Math.round((Math.abs(targetAngle) / degPerSec) * 1000 * effectiveTurnDurationScale()));
 }
 
-function effectiveTurnDurationScale(turnDurationScale) {
-  return Math.max(0.1, Math.abs(Number(turnDurationScale) || 1)) * DEAD_TURN_DURATION_BASE_SCALE;
+function effectiveTurnDurationScale() {
+  return DEAD_TURN_DURATION_BASE_SCALE;
 }
 
 function turnCalibrationStats(test, entry) {
@@ -1581,18 +1554,7 @@ function turnCalibrationStats(test, entry) {
   const absolutes = runs.map((value) => Math.abs(value));
   const avg = absolutes.reduce((sum, value) => sum + value, 0) / absolutes.length;
   const range = Math.max(...absolutes) - Math.min(...absolutes);
-  const scale = Math.abs(test.targetAngle) / avg;
-  return { avg, range, scale };
-}
-
-function recommendedTurnScale() {
-  const scales = [];
-  for (const test of TURN_CALIBRATION_TESTS) {
-    const stats = turnCalibrationStats(test, turnCalibrationLog[test.id] || {});
-    if (stats.scale != null && (stats.range == null || stats.range <= 15)) scales.push(stats.scale);
-  }
-  if (!scales.length) return DEFAULT_CONFIG.deadTurnDurationScale;
-  return scales.reduce((sum, value) => sum + value, 0) / scales.length;
+  return { avg, range };
 }
 
 function updateTurnCalibrationInput(input) {
@@ -1610,23 +1572,9 @@ function finalizeTurnCalibrationInput() {
   renderTurnCalibration();
 }
 
-function applyRecommendedTurnScale() {
-  const recommended = recommendedTurnScale();
-  if (recommended == null) return;
-  config.deadTurnDurationScale = clamp(Number(recommended.toFixed(2)), 0.1, 5);
-  saveConfig();
-  syncConfigToForm();
-  invalidateSimulation("回転倍率を更新しました");
-  renderTurnCalibration();
-  draw();
-}
-
 function clearTurnCalibrationLog() {
   turnCalibrationLog = {};
   localStorage.removeItem("toioPlotterTurnCalibrationLog");
-  config.deadTurnDurationScale = DEFAULT_CONFIG.deadTurnDurationScale;
-  saveConfig();
-  syncConfigToForm();
   simulation = null;
   invalidateSimulation("回転テストログと回転倍率をリセットしました");
   renderTurnCalibration();
@@ -2142,13 +2090,13 @@ function deadTurnDurationMsForRun(command) {
   const durationMs = Math.max(MIN_TURN_DURATION_MS, command.durationMs || 0);
   if (command.manualWheelSpeeds) return durationMs;
   if (command.turnDurationBaseScale === DEAD_TURN_DURATION_BASE_SCALE) return durationMs;
-  return plannedTurnDurationMs(command.angle || 0, command.turnDurationScale ?? config.deadTurnDurationScale);
+  return plannedTurnDurationMs(command.angle || 0);
 }
 
-function plannedTurnDurationMs(angleDeg, turnDurationScale) {
+function plannedTurnDurationMs(angleDeg) {
   if (Math.abs(angleDeg) < 0.1) return 0;
   const degPerSec = Math.max(10, Math.abs(config.deadTurnSpeed) * 4);
-  return Math.max(MIN_TURN_DURATION_MS, Math.round((Math.abs(angleDeg) / degPerSec) * 1000 * effectiveTurnDurationScale(turnDurationScale)));
+  return Math.max(MIN_TURN_DURATION_MS, Math.round((Math.abs(angleDeg) / degPerSec) * 1000 * effectiveTurnDurationScale()));
 }
 
 async function runDeadMotor(command) {
@@ -2298,7 +2246,6 @@ function bindEvents() {
     const button = event.target.closest?.("[data-run-turn-test]");
     if (button) runTurnCalibrationTest(button.dataset.runTurnTest).catch((error) => log(error.message));
   });
-  els.applyTurnScaleBtn?.addEventListener("click", applyRecommendedTurnScale);
   els.clearTurnLogBtn?.addEventListener("click", clearTurnCalibrationLog);
   els.runBtn.addEventListener("click", () => runToio());
   els.stopBtn.addEventListener("click", () => emergencyStop());

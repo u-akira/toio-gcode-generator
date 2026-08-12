@@ -24,12 +24,8 @@ test("default dead reckoning turn speed is conservative for calibration", () => 
   assert.equal(core.DEFAULT_CONFIG.deadTurnSpeed, 15);
 });
 
-test("default dead reckoning turn duration scale is neutral", () => {
-  assert.equal(core.DEFAULT_CONFIG.deadTurnDurationScale, 1);
-});
-
-test("default dead reckoning turn duration uses calibrated base scale", () => {
-  assert.equal(core.effectiveTurnDurationScale(core.DEFAULT_CONFIG.deadTurnDurationScale), 0.5);
+test("dead reckoning turn duration uses fixed calibrated base scale", () => {
+  assert.equal(core.effectiveTurnDurationScale(), 0.5);
 });
 
 test("pen front/back offset changes simulated cube path", () => {
@@ -202,7 +198,7 @@ test("dead reckoning changes draw direction with motor-only transition steps", (
   assert.equal(result.commands.some((command) => command.type === "align"), false);
 });
 
-test("dead reckoning global turn duration scale affects turn commands", () => {
+test("dead reckoning ignores saved turn duration scale values", () => {
   const base = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnDurationScale: 1 })).plan([
     makeStroke([
       [190, 250],
@@ -222,11 +218,11 @@ test("dead reckoning global turn duration scale affects turn commands", () => {
 
   assert.ok(baseTurn);
   assert.ok(scaledTurn);
-  assert.ok(scaledTurn.durationMs < baseTurn.durationMs);
+  assert.equal(scaledTurn.durationMs, baseTurn.durationMs);
 });
 
 test("dead reckoning default turn duration uses calibrated base", () => {
-  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnSpeed: 15, deadTurnDurationScale: 1 })).plan([
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnSpeed: 15 })).plan([
     makeStroke([
       [190, 250],
       [250, 250],
@@ -255,7 +251,7 @@ test("dead reckoning turn commands keep planned wheel speeds", () => {
   assert.equal(turn.rightSpeed, -15);
 });
 
-test("dead reckoning turn duration scale remains relative to the calibrated base", () => {
+test("dead reckoning segment turn duration scale is ignored", () => {
   const base = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnSpeed: 20, deadTurnDurationScale: 1 })).plan([
     makeStroke([
       [190, 250],
@@ -263,7 +259,10 @@ test("dead reckoning turn duration scale remains relative to the calibrated base
       [250, 310],
     ]),
   ]);
-  const doubled = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnSpeed: 20, deadTurnDurationScale: 2 })).plan([
+  const doubled = new core.DeadReckoningPlanner(
+    core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnSpeed: 20 }),
+    { "seg-0": { turnDurationScale: 2 } },
+  ).plan([
     makeStroke([
       [190, 250],
       [250, 250],
@@ -275,11 +274,11 @@ test("dead reckoning turn duration scale remains relative to the calibrated base
 
   assert.ok(baseTurn);
   assert.ok(doubledTurn);
-  assert.equal(doubledTurn.durationMs, baseTurn.durationMs * 2);
+  assert.equal(doubledTurn.durationMs, baseTurn.durationMs);
 });
 
 test("dead reckoning turn commands keep a practical minimum duration", () => {
-  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnSpeed: 20, deadTurnDurationScale: 0.33 })).plan([
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTurnSpeed: 20 })).plan([
     makeStroke([
       [190, 250],
       [250, 250],
