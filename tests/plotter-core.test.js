@@ -140,6 +140,40 @@ test("dead reckoning simulation creates draw segments and motor commands", () =>
   assert.ok(result.commands.some((command) => command.type === "motor"));
 });
 
+test("dead reckoning arc primitive creates one arc motor command", () => {
+  const stroke = {
+    raw: [
+      { x: 320, y: 250 },
+      { x: 250, y: 320 },
+      { x: 180, y: 250 },
+      { x: 250, y: 180 },
+      { x: 320, y: 250 },
+    ],
+    primitives: [
+      {
+        kind: "arc",
+        center: { x: 250, y: 250 },
+        radius: 70,
+        startAngle: 0,
+        sweepAngle: 360,
+      },
+    ],
+  };
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: 0, penOffsetY: 0 })).plan([stroke]);
+  const drawMotors = result.commands.filter((command) => command.type === "motor" && command.kind === "draw");
+
+  assert.equal(result.segments.length, 1);
+  assert.equal(result.segments[0].geometry, "arc");
+  assert.equal(result.stats.drawSegments, 1);
+  assert.equal(result.stats.penDowns, 1);
+  assert.equal(result.stats.penUps, 1);
+  assert.equal(drawMotors.length, 1);
+  assert.equal(drawMotors[0].geometry, "arc");
+  assert.notEqual(drawMotors[0].leftSpeed, drawMotors[0].rightSpeed);
+  assert.ok(drawMotors[0].durationMs > 2550);
+  assert.ok(drawMotors[0].penPreviewPoints.length > 10);
+});
+
 test("dead reckoning motor commands include cube start and end centers", () => {
   const stroke = makeStroke([
     [190, 250],

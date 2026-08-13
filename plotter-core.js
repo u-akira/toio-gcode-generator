@@ -16,7 +16,7 @@
 
   const NATIVE_MAT = { ...MAT };
   const DEFAULT_CONFIG = {
-    configVersion: 25,
+    configVersion: 26,
     safeScale: 0.75,
     fixedHeading: 0,
     penOffsetX: -48,
@@ -45,8 +45,10 @@
     deadMmPerSecAtDrawSpeed: 30,
     deadMmPerSecAtTravelSpeed: 70,
     deadTravelDistanceScale: 1,
+    deadWheelBaseMm: 26,
   };
   const MIN_TURN_DURATION_MS = 150;
+  const ARC_PREVIEW_STEP_DEG = 5;
 
   function withDefaults(config = {}) {
     return { ...DEFAULT_CONFIG, ...config, configVersion: DEFAULT_CONFIG.configVersion };
@@ -108,7 +110,12 @@
     }
 
     processStrokes(strokes) {
-      return strokes.map((stroke) => ({ ...stroke, processed: processStroke(stroke.raw, this.config) }));
+      return strokes.map((stroke) => ({
+        ...stroke,
+        raw: Array.isArray(stroke.raw) ? stroke.raw : [],
+        primitives: Array.isArray(stroke.primitives) ? stroke.primitives : null,
+        processed: processStroke(Array.isArray(stroke.raw) ? stroke.raw : [], this.config),
+      }));
     }
 
     uniqueMessages(messages, limit) {
@@ -239,14 +246,22 @@
       return strokes.map((stroke) => ({
         ...stroke,
         raw: stroke.raw.map((point) => ({ ...point })),
+        primitives: stroke.primitives?.map((primitive) => clonePrimitive(primitive)) || null,
         processed: stroke.processed.map((point) => ({ ...point })),
       }));
     }
 
     addStroke(plan, stroke) {
-      if (!stroke.raw || stroke.processed.length < 2) return;
+      if (!stroke.raw && !stroke.primitives) return;
       plan.stats.rawPoints += stroke.raw.length;
       plan.stats.processedPoints += stroke.processed.length;
+
+      if (stroke.primitives?.length) {
+        this.addPrimitiveStroke(plan, stroke);
+        return;
+      }
+
+      if (stroke.processed.length < 2) return;
 
       const strokeStart = stroke.processed[0];
       if (this.currentPen && distance(this.currentPen, strokeStart) >= 0.1) {
@@ -261,12 +276,52 @@
       }
     }
 
+    addPrimitiveStroke(plan, stroke) {
+      for (const primitive of stroke.primitives) {
+        const primitiveStart = this.primitiveStartPoint(primitive);
+        if (!primitiveStart) continue;
+        if (this.currentPen && distance(this.currentPen, primitiveStart) >= 0.1) {
+          this.addSegment(plan, "travel", this.currentPen, primitiveStart);
+        }
+        if (primitive.kind === "line") {
+          const start = clonePoint(primitive.start);
+          const end = clonePoint(primitive.end);
+          if (!isFinitePoint(start) || !isFinitePoint(end) || distance(start, end) < 0.1) continue;
+          this.addSegment(plan, "draw", start, end);
+        } else if (primitive.kind === "arc") {
+          this.addArcSegment(plan, "draw", primitive);
+        }
+      }
+    }
+
+    primitiveStartPoint(primitive) {
+      if (!primitive) return null;
+      if (primitive.kind === "line") return clonePoint(primitive.start);
+      if (primitive.kind === "arc") {
+        const arc = normalizeArcPrimitive(primitive);
+        if (!arc) return null;
+        return cubeToPen(pointOnCircle(arc.center, arc.radius, arc.startAngle), arc.startHeading, this.config);
+      }
+      return null;
+    }
+
     addSegment(plan, kind, start, end) {
       const segment = this.buildSegment(kind, start, end);
       plan.segments.push(segment);
       this.addSegmentCommands(plan, segment);
       this.currentPen = end;
       this.currentHeading = segment.heading;
+      this.currentCube = segment.endCube;
+      this.segmentIndex += 1;
+    }
+
+    addArcSegment(plan, kind, primitive) {
+      const segment = this.buildArcSegment(kind, primitive);
+      if (!segment) return;
+      plan.segments.push(segment);
+      this.addSegmentCommands(plan, segment);
+      this.currentPen = segment.end;
+      this.currentHeading = segment.endHeading;
       this.currentCube = segment.endCube;
       this.segmentIndex += 1;
     }
@@ -290,6 +345,7 @@
       return {
         id,
         kind,
+        geometry: "line",
         start,
         end,
         startCube,
@@ -306,6 +362,61 @@
       };
     }
 
+    buildArcSegment(kind, primitive) {
+      const config = this.config;
+      const arc = normalizeArcPrimitive(primitive);
+      if (!arc) return null;
+      const id = `seg-${this.segmentIndex}`;
+      const previousHeading = this.currentHeading == null ? arc.startHeading : this.currentHeading;
+      const turnAngleValue = signedAngleDelta(previousHeading, arc.startHeading);
+      const saved = this.segmentSettings[id] || {};
+      const baseSpeed = kind === "draw" ? config.drawSpeed : config.travelSpeed;
+      const baseMmPerSec = kind === "draw" ? config.deadMmPerSecAtDrawSpeed : config.deadMmPerSecAtTravelSpeed;
+      const speed = clamp(Number(saved.speed ?? baseSpeed), 1, 255);
+      const durationScale = clamp(Number(saved.durationScale ?? 1), 0.1, 5);
+      const steeringTrim = clamp(Number(saved.steeringTrim ?? 0), -80, 80);
+      const wheelBaseMm = Math.max(1, Number(config.deadWheelBaseMm) || DEFAULT_CONFIG.deadWheelBaseMm);
+      const startCube = pointOnCircle(arc.center, arc.radius, arc.startAngle);
+      const endCube = pointOnCircle(arc.center, arc.radius, arc.startAngle + arc.sweepAngle);
+      const start = cubeToPen(startCube, arc.startHeading, config);
+      const end = cubeToPen(endCube, arc.endHeading, config);
+      const arcLengthMm = arc.radius * Math.abs(degToRad(arc.sweepAngle));
+      const wheelSpeeds = computeArcWheelSpeeds(speed, arc.radius, arc.sweepAngle, wheelBaseMm, steeringTrim);
+      const averageSpeed = (Math.abs(wheelSpeeds.left) + Math.abs(wheelSpeeds.right)) / 2;
+      const durationMs = computeUnclampedMotionDurationMs(arcLengthMm, averageSpeed, baseSpeed, baseMmPerSec, durationScale);
+      const preview = arcPreviewPoints({ ...arc, startCube, endCube }, config);
+      return {
+        id,
+        kind,
+        geometry: "arc",
+        center: arc.center,
+        radius: arc.radius,
+        startAngle: arc.startAngle,
+        sweepAngle: arc.sweepAngle,
+        clockwise: arc.sweepAngle >= 0,
+        start,
+        end,
+        startCube,
+        endCube,
+        heading: arc.startHeading,
+        startHeading: arc.startHeading,
+        endHeading: arc.endHeading,
+        lengthMm: arcLengthMm,
+        turnAngle: turnAngleValue,
+        speed,
+        durationScale,
+        distanceScale: 1,
+        steeringTrim,
+        wheelBaseMm,
+        leftSpeed: wheelSpeeds.left,
+        rightSpeed: wheelSpeeds.right,
+        durationMs,
+        turnDurationMs: computeTurnDurationMs(turnAngleValue, config),
+        cubePreviewPoints: preview.cubePreviewPoints,
+        penPreviewPoints: preview.penPreviewPoints,
+      };
+    }
+
     addSegmentCommands(plan, segment) {
       if (this.currentCube) {
         this.addMotorOnlyTransition(plan, segment);
@@ -318,16 +429,24 @@
         type: "motor",
         segmentId: segment.id,
         kind: segment.kind,
-        leftSpeed: segment.speed + segment.steeringTrim,
-        rightSpeed: segment.speed - segment.steeringTrim,
+        geometry: segment.geometry,
+        leftSpeed: segment.leftSpeed ?? segment.speed + segment.steeringTrim,
+        rightSpeed: segment.rightSpeed ?? segment.speed - segment.steeringTrim,
         durationMs: segment.durationMs,
         fromX: segment.startCube.x,
         fromY: segment.startCube.y,
         x: segment.endCube.x,
         y: segment.endCube.y,
-        theta: segment.heading,
+        theta: segment.endHeading ?? segment.heading,
+        startTheta: segment.startHeading ?? segment.heading,
         penX: segment.end.x,
         penY: segment.end.y,
+        center: segment.center,
+        radius: segment.radius,
+        startAngle: segment.startAngle,
+        sweepAngle: segment.sweepAngle,
+        cubePreviewPoints: segment.cubePreviewPoints,
+        penPreviewPoints: segment.penPreviewPoints,
       });
       if (segment.kind === "draw") {
         plan.commands.push({ type: "pen", state: "up", penX: segment.end.x, penY: segment.end.y });
@@ -337,7 +456,11 @@
         plan.stats.travelSegments += 1;
       }
       if (this.currentCube) plan.cubePath.push({ ...this.currentCube, theta: this.currentHeading });
-      plan.cubePath.push({ ...segment.startCube, theta: segment.heading }, { ...segment.endCube, theta: segment.heading });
+      if (segment.geometry === "arc") {
+        plan.cubePath.push(...segment.cubePreviewPoints);
+      } else {
+        plan.cubePath.push({ ...segment.startCube, theta: segment.heading }, { ...segment.endCube, theta: segment.heading });
+      }
     }
 
     addMotorOnlyTransition(plan, segment) {
@@ -428,6 +551,31 @@
     return roundToMotorDurationMs(Math.max(10, (lengthMm / mmPerSec) * 1000 * durationScale));
   }
 
+  function computeUnclampedMotionDurationMs(lengthMm, speed, baseSpeed, baseMmPerSec, durationScale) {
+    const mmPerSec = Math.max(1, baseMmPerSec * (speed / Math.max(1, baseSpeed)));
+    return Math.max(10, Math.round(((lengthMm / mmPerSec) * 1000 * durationScale) / 10) * 10);
+  }
+
+  function computeArcWheelSpeeds(speed, radius, sweepAngle, wheelBaseMm, steeringTrim = 0) {
+    const turnSign = sweepAngle >= 0 ? 1 : -1;
+    const halfBase = wheelBaseMm / 2;
+    const safeRadius = Math.max(halfBase + 1, Math.abs(radius));
+    let left = speed * (safeRadius + turnSign * halfBase) / safeRadius;
+    let right = speed * (safeRadius - turnSign * halfBase) / safeRadius;
+    left += steeringTrim;
+    right -= steeringTrim;
+    const maxAbs = Math.max(Math.abs(left), Math.abs(right), 1);
+    if (maxAbs > 255) {
+      const scale = 255 / maxAbs;
+      left *= scale;
+      right *= scale;
+    }
+    return {
+      left: Math.round(clamp(left, -255, 255)),
+      right: Math.round(clamp(right, -255, 255)),
+    };
+  }
+
   function computeTurnDurationMs(angleDeg, configInput = {}) {
     if (Math.abs(angleDeg) < 0.1) return 0;
     const config = withDefaults(configInput);
@@ -446,6 +594,49 @@
     return {
       left: Math.round(direction * clamp(base + trim, 0, 255)),
       right: Math.round(-direction * clamp(base - trim, 0, 255)),
+    };
+  }
+
+  function normalizeArcPrimitive(primitive) {
+    const center = clonePoint(primitive.center);
+    const radius = Number(primitive.radius);
+    const startAngle = Number(primitive.startAngle);
+    const sweepAngle = Number(primitive.sweepAngle);
+    if (!isFinitePoint(center) || !Number.isFinite(radius) || !Number.isFinite(startAngle) || !Number.isFinite(sweepAngle)) return null;
+    if (Math.abs(radius) < 1 || Math.abs(sweepAngle) < 0.1) return null;
+    const startHeading = normalizeDegrees(startAngle + (sweepAngle >= 0 ? 90 : -90));
+    const endHeading = normalizeDegrees(startHeading + sweepAngle);
+    return {
+      center,
+      radius: Math.abs(radius),
+      startAngle,
+      sweepAngle,
+      startHeading,
+      endHeading,
+    };
+  }
+
+  function arcPreviewPoints(arc, config) {
+    const count = Math.max(1, Math.ceil(Math.abs(arc.sweepAngle) / ARC_PREVIEW_STEP_DEG));
+    const cubePreviewPoints = [];
+    const penPreviewPoints = [];
+    for (let i = 0; i <= count; i += 1) {
+      const t = i / count;
+      const angle = arc.startAngle + arc.sweepAngle * t;
+      const theta = normalizeDegrees(arc.startHeading + arc.sweepAngle * t);
+      const cube = pointOnCircle(arc.center, arc.radius, angle);
+      const cubePose = { ...cube, theta };
+      cubePreviewPoints.push(cubePose);
+      penPreviewPoints.push(cubeToPen(cube, theta, config));
+    }
+    return { cubePreviewPoints, penPreviewPoints };
+  }
+
+  function pointOnCircle(center, radius, angleDeg) {
+    const angle = degToRad(angleDeg);
+    return {
+      x: center.x + Math.cos(angle) * radius,
+      y: center.y + Math.sin(angle) * radius,
     };
   }
 
@@ -603,6 +794,34 @@
     return Math.hypot(a.x - b.x, a.y - b.y);
   }
 
+  function clonePoint(point) {
+    return point ? { x: Number(point.x), y: Number(point.y) } : null;
+  }
+
+  function clonePrimitive(primitive) {
+    if (primitive?.kind === "arc") {
+      return {
+        kind: "arc",
+        center: clonePoint(primitive.center),
+        radius: Number(primitive.radius),
+        startAngle: Number(primitive.startAngle),
+        sweepAngle: Number(primitive.sweepAngle),
+      };
+    }
+    if (primitive?.kind === "line") {
+      return {
+        kind: "line",
+        start: clonePoint(primitive.start),
+        end: clonePoint(primitive.end),
+      };
+    }
+    return { ...primitive };
+  }
+
+  function isFinitePoint(point) {
+    return Boolean(point && Number.isFinite(point.x) && Number.isFinite(point.y));
+  }
+
   function turnAngle(a, b, c) {
     const ab = { x: a.x - b.x, y: a.y - b.y };
     const cb = { x: c.x - b.x, y: c.y - b.y };
@@ -619,6 +838,10 @@
 
   function degToRad(deg) {
     return (deg * Math.PI) / 180;
+  }
+
+  function normalizeDegrees(value) {
+    return ((value % 360) + 360) % 360;
   }
 
   return {
@@ -638,11 +861,14 @@
     computeTurnDurationMs,
     roundToMotorDurationMs,
     computeTurnWheelSpeeds,
+    computeArcWheelSpeeds,
     createSimulation,
     createDeadReckoningSimulation,
     penToCube,
+    cubeToPen,
     headingBetween,
     signedAngleDelta,
     distance,
+    pointOnCircle,
   };
 });

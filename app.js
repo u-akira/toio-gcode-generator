@@ -3,6 +3,19 @@
 const { MAT, DEFAULT_CONFIG, nativeToMatPose, matToNativePoint } = window.PlotterCore;
 const { ToioCube } = window.ToioBle;
 const { Sb3Exporter } = window;
+const { distance, turnAngle, clamp, degToRad, rotatePoint, normalizeDegrees, pointInBounds } = window.ToioPlotterGeometry;
+const { formatSeconds, formatAngle, escapeHtml } = window.ToioPlotterFormatters;
+const {
+  loadConfig,
+  saveConfig,
+  loadDeadSegmentSettings,
+  saveDeadSegmentSettings,
+  serializeCommandOverrides,
+  loadCommandOverrides,
+  loadTurnCalibrationLog,
+  saveTurnCalibrationLog,
+  clearTurnCalibrationLog: clearStoredTurnCalibrationLog,
+} = window.ToioPlotterStorage;
 
 const COLORS = {
   drawing: "#202124",
@@ -79,6 +92,7 @@ const configInputs = [
   "deadMmPerSecAtDrawSpeed",
   "deadMmPerSecAtTravelSpeed",
   "deadTravelDistanceScale",
+  "deadWheelBaseMm",
   "smoothing",
   "minPointDistance",
   "cornerAngle",
@@ -112,7 +126,7 @@ let simulationAnimation = null;
 let activeSimulationCommandIndex = -1;
 let deadSegmentSettings = loadDeadSegmentSettings();
 let commandOverrides = new Map();
-let turnCalibrationLog = loadTurnCalibrationLog();
+let turnCalibrationLog = loadTurnCalibrationLog({ resetOnLoad: resetTurnCalibrationLogOnLoad });
 let selectedDeadSegmentId = null;
 let running = false;
 let abortRun = false;
@@ -138,142 +152,35 @@ playMatImage.onerror = () => {
 };
 playMatImage.src = PLAY_MAT_IMAGE_SRC;
 
-function loadConfig() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("toioPlotterConfig") || "{}");
-    const savedVersion = saved.configVersion || 0;
-    let changed = false;
-    if (!saved.configVersion && saved.penOffsetX === 0 && saved.penOffsetY === 48) {
-      saved.penOffsetX = DEFAULT_CONFIG.penOffsetX;
-      saved.penOffsetY = DEFAULT_CONFIG.penOffsetY;
-      changed = true;
-    }
-    if (savedVersion < 3) {
-      saved.upMotorSpeed = DEFAULT_CONFIG.upMotorSpeed;
-      saved.downMotorSpeed = DEFAULT_CONFIG.downMotorSpeed;
-      saved.penMotorMode = DEFAULT_CONFIG.penMotorMode;
-      changed = true;
-    }
-    if (savedVersion < 4) {
-      saved.travelSpeed = DEFAULT_CONFIG.travelSpeed;
-      saved.upMotorSpeed = DEFAULT_CONFIG.upMotorSpeed;
-      saved.downMotorSpeed = DEFAULT_CONFIG.downMotorSpeed;
-      changed = true;
-    }
-    if (savedVersion < 5) {
-      saved.drawSpeed = DEFAULT_CONFIG.drawSpeed;
-      saved.travelSpeed = DEFAULT_CONFIG.travelSpeed;
-      changed = true;
-    }
-    if (savedVersion < 6) {
-      saved.upMotorSpeed = DEFAULT_CONFIG.upMotorSpeed;
-      changed = true;
-    }
-    if (savedVersion < 7) {
-      saved.upMotorSpeed = DEFAULT_CONFIG.upMotorSpeed;
-      changed = true;
-    }
-    if (savedVersion < 8) {
-      saved.runMode = DEFAULT_CONFIG.runMode;
-      saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
-      saved.deadTurnBalanceTrim = DEFAULT_CONFIG.deadTurnBalanceTrim;
-      saved.deadMmPerSecAtDrawSpeed = DEFAULT_CONFIG.deadMmPerSecAtDrawSpeed;
-      saved.deadMmPerSecAtTravelSpeed = DEFAULT_CONFIG.deadMmPerSecAtTravelSpeed;
-      changed = true;
-    }
-    if (savedVersion < 11) {
-      changed = true;
-    }
-    if (savedVersion < 12 && saved.deadTurnSpeed === 30) {
-      saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
-      changed = true;
-    }
-    if (savedVersion < 16) {
-      saved.deadMmPerSecAtTravelSpeed = DEFAULT_CONFIG.deadMmPerSecAtTravelSpeed;
-      changed = true;
-    }
-    if (savedVersion < 24) {
-      saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
-      changed = true;
-    }
-    if (Object.prototype.hasOwnProperty.call(saved, "deadTurnDurationScale")) {
-      delete saved.deadTurnDurationScale;
-      changed = true;
-    }
-    if (savedVersion < 24) {
-      saved.deadTurnMsPer90 = DEFAULT_CONFIG.deadTurnMsPer90;
-      changed = true;
-    }
-    if (savedVersion < 25) {
-      saved.deadTravelDistanceScale = DEFAULT_CONFIG.deadTravelDistanceScale;
-      changed = true;
-    }
-    const loaded = { ...DEFAULT_CONFIG, ...saved, configVersion: DEFAULT_CONFIG.configVersion };
-    if (changed || saved.configVersion !== DEFAULT_CONFIG.configVersion) {
-      localStorage.setItem("toioPlotterConfig", JSON.stringify(loaded));
-    }
-    return loaded;
-  } catch {
-    return { ...DEFAULT_CONFIG };
-  }
-}
-
-function saveConfig() {
-  localStorage.setItem("toioPlotterConfig", JSON.stringify(config));
-}
-
-function loadDeadSegmentSettings() {
-  try {
-    const settings = JSON.parse(localStorage.getItem("toioPlotterDeadSegmentSettings") || "{}");
-    let changed = false;
-    for (const setting of Object.values(settings)) {
-      if (setting && Object.prototype.hasOwnProperty.call(setting, "turnDurationScale")) {
-        delete setting.turnDurationScale;
-        changed = true;
-      }
-    }
-    if (changed) localStorage.setItem("toioPlotterDeadSegmentSettings", JSON.stringify(settings));
-    return settings;
-  } catch {
-    return {};
-  }
-}
-
-function saveDeadSegmentSettings() {
-  localStorage.setItem("toioPlotterDeadSegmentSettings", JSON.stringify(deadSegmentSettings));
-}
-
-function serializeCommandOverrides() {
-  return Object.fromEntries(commandOverrides.entries());
-}
-
-function loadCommandOverrides(value) {
-  if (Array.isArray(value)) return new Map(value);
-  if (value && typeof value === "object") return new Map(Object.entries(value));
-  return new Map();
-}
-
-function loadTurnCalibrationLog() {
-  if (resetTurnCalibrationLogOnLoad) {
-    localStorage.removeItem("toioPlotterTurnCalibrationLog");
-    return {};
-  }
-  try {
-    return JSON.parse(localStorage.getItem("toioPlotterTurnCalibrationLog") || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveTurnCalibrationLog() {
-  localStorage.setItem("toioPlotterTurnCalibrationLog", JSON.stringify(turnCalibrationLog));
-}
+const canvasRenderer = window.ToioPlotterCanvas.createCanvasRenderer({
+  MAT,
+  COLORS,
+  canvas: els.canvas,
+  ctx,
+  playMatImage,
+  getConfig: () => config,
+  getStrokes: () => strokes,
+  getActiveStroke: () => activeStroke,
+  getSimulation: () => simulation,
+  getSimulationValid: () => simulationValid,
+  getSimulationAnimation: () => simulationAnimation,
+  getAnimatedCommands: () => getAnimatedCommands(),
+  getDeadSegments: () => getDeadSegments(),
+  getSelectedDeadSegmentId: () => selectedDeadSegmentId,
+  getMovePoseStatus: () => getMovePoseStatus(),
+  getLegendVisible: () => legendVisible,
+  isDeadMode: () => isDeadMode(),
+  safeBounds: () => safeBounds(),
+  nativeToMatPose,
+  distance,
+  degToRad,
+});
 
 function resetDeadSegmentSettings() {
   deadSegmentSettings = {};
   commandOverrides = new Map();
   selectedDeadSegmentId = null;
-  saveDeadSegmentSettings();
+  saveDeadSegmentSettings(deadSegmentSettings);
   renderDeadSegmentsEditor();
 }
 
@@ -298,7 +205,7 @@ function applyConfigFromForm({ invalidate = true } = {}) {
     config[key] = input.value;
   }
   if (changed) {
-    saveConfig();
+    saveConfig(config);
     if (invalidate) {
       simulation = null;
       invalidateSimulation("設定を変更しました");
@@ -368,108 +275,20 @@ function resizeCanvasBackingStore() {
   }
 }
 
-function getView() {
-  const width = els.canvas.width;
-  const height = els.canvas.height;
-  const bounds = getDrawingBounds();
-  const matW = bounds.maxX - bounds.minX;
-  const matH = bounds.maxY - bounds.minY;
-  const margin = 42 * (window.devicePixelRatio || 1);
-  const scale = Math.min((width - margin * 2) / matW, (height - margin * 2) / matH);
-  const drawW = matW * scale;
-  const drawH = matH * scale;
-  return {
-    scale,
-    left: (width - drawW) / 2,
-    top: (height - drawH) / 2,
-    width: drawW,
-    height: drawH,
-  };
-}
-
-function matToCanvas(point) {
-  const view = getView();
-  const bounds = getDrawingBounds();
-  return {
-    x: view.left + (point.x - bounds.minX) * view.scale,
-    y: view.top + (point.y - bounds.minY) * view.scale,
-  };
-}
-
 function canvasToMat(clientX, clientY) {
-  const rect = els.canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  const x = (clientX - rect.left) * dpr;
-  const y = (clientY - rect.top) * dpr;
-  const view = getView();
-  const bounds = getDrawingBounds();
-  return {
-    x: bounds.minX + (x - view.left) / view.scale,
-    y: bounds.minY + (y - view.top) / view.scale,
-  };
+  return canvasRenderer.canvasToMat(clientX, clientY);
 }
 
 function isDeadMode() {
   return config.runMode === "dead";
 }
 
-function getDrawingBounds() {
-  return MAT;
-}
-
 function safeBounds() {
   return window.PlotterCore.safeBounds(config);
 }
 
-function pointInBounds(point, bounds) {
-  return point.x >= bounds.minX && point.x <= bounds.maxX && point.y >= bounds.minY && point.y <= bounds.maxY;
-}
-
 function draw() {
-  els.canvas.style.cursor = isDeadMode() && simulationValid && getDeadSegments().length ? "pointer" : "crosshair";
-  ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
-  drawMat();
-  for (const stroke of strokes) drawStroke(stroke.processed || stroke.raw, COLORS.drawing, 2.2);
-  if (activeStroke) drawStroke(activeStroke.raw, COLORS.drawing, 2.2);
-  if (simulation) {
-    const animatedCommands = getAnimatedCommands();
-    drawCommands(animatedCommands);
-    drawDeadSegmentSelectionOverlay();
-    if (simulationAnimation) {
-      drawAnimationCursor(animatedCommands);
-    } else {
-      drawCubePath(simulation.cubePath);
-    }
-  }
-  const poseStatus = getMovePoseStatus();
-  if (!isDeadMode() && poseStatus.pose && poseStatus.state !== "missed") {
-    drawCubePose(nativeToMatPose(poseStatus.pose), COLORS.liveCube, poseStatus.state === "unstable" ? 0.42 : 1, true);
-  }
-  if (legendVisible) drawLegend();
-}
-
-function drawDeadSegmentSelectionOverlay() {
-  const segments = getDeadSegments();
-  if (!isDeadMode() || !segments.length) return;
-  for (const segment of segments) {
-    const selected = segment.id === selectedDeadSegmentId;
-    drawSegmentHighlight(segment, selected);
-  }
-}
-
-function drawSegmentHighlight(segment, selected) {
-  const dpr = window.devicePixelRatio || 1;
-  const start = matToCanvas(segment.start);
-  const end = matToCanvas(segment.end);
-  ctx.save();
-  ctx.lineCap = "round";
-  ctx.strokeStyle = selected ? "rgba(37, 99, 235, 0.85)" : "rgba(37, 99, 235, 0.45)";
-  ctx.lineWidth = 2.5 * dpr;
-  ctx.beginPath();
-  ctx.moveTo(start.x, start.y);
-  ctx.lineTo(end.x, end.y);
-  ctx.stroke();
-  ctx.restore();
+  canvasRenderer.draw({ playMatImageLoaded });
 }
 
 function syncLegendToggle() {
@@ -483,234 +302,6 @@ function toggleLegend() {
   draw();
 }
 
-function drawMat() {
-  const bounds = getDrawingBounds();
-  const p1 = matToCanvas({ x: bounds.minX, y: bounds.minY });
-  const p2 = matToCanvas({ x: bounds.maxX, y: bounds.maxY });
-  ctx.save();
-  ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
-  ctx.strokeStyle = "#9d9588";
-  ctx.fillStyle = "#fffdf8";
-  ctx.fillRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
-  if (!isDeadMode() && playMatImageLoaded) {
-    ctx.drawImage(playMatImage, p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
-  }
-  ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
-
-  let label = "A3 simple play mat #01 (Position ID)";
-  const safe = safeBounds();
-  const s1 = matToCanvas({ x: safe.minX, y: safe.minY });
-  const s2 = matToCanvas({ x: safe.maxX, y: safe.maxY });
-  ctx.setLineDash([8, 7]);
-  ctx.strokeStyle = "#0f7b6c";
-  ctx.strokeRect(s1.x, s1.y, s2.x - s1.x, s2.y - s1.y);
-  ctx.setLineDash([]);
-  ctx.fillStyle = "#6c6f73";
-  ctx.font = `${12 * (window.devicePixelRatio || 1)}px system-ui`;
-  ctx.fillText("safe drawing area", s1.x + 10, s1.y + 18);
-
-  if (isDeadMode()) {
-    label = "Dead reckoning preview (same drawing coordinates)";
-  }
-
-  ctx.fillStyle = "#6c6f73";
-  ctx.font = `${12 * (window.devicePixelRatio || 1)}px system-ui`;
-  ctx.fillText(label, p1.x + 10, p1.y + 18);
-  ctx.restore();
-}
-
-function drawStroke(points, color, width, dash = null) {
-  if (!points || points.length < 2) return;
-  ctx.save();
-  ctx.lineWidth = width * (window.devicePixelRatio || 1);
-  ctx.strokeStyle = color;
-  if (dash) ctx.setLineDash(dash.map((value) => value * (window.devicePixelRatio || 1)));
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  const first = matToCanvas(points[0]);
-  ctx.moveTo(first.x, first.y);
-  for (let i = 1; i < points.length; i += 1) {
-    const point = matToCanvas(points[i]);
-    ctx.lineTo(point.x, point.y);
-  }
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawCommands(commands) {
-  const downSegments = [];
-  const upSegments = [];
-  const events = [];
-  let downPoints = [];
-  let upPoints = [];
-  let penDown = false;
-  let lastPenPoint = null;
-  for (const command of commands) {
-    if (command.type === "pen") {
-      const eventPoint = command.penX == null ? null : { x: command.penX, y: command.penY };
-      if (eventPoint) {
-        events.push({ ...eventPoint, state: command.state });
-        lastPenPoint = eventPoint;
-      }
-      if (penDown && command.state === "up" && downPoints.length > 1) downSegments.push(downPoints);
-      if (!penDown && command.state === "down" && upPoints.length > 1) upSegments.push(upPoints);
-      if (command.state === "down") downPoints = eventPoint ? [eventPoint] : [];
-      if (command.state === "up") upPoints = eventPoint ? [eventPoint] : [];
-      penDown = command.state === "down";
-    }
-    if ((command.type === "move" || command.type === "motor") && command.penX != null) {
-      const point = { x: command.penX, y: command.penY };
-      if (penDown) {
-        downPoints.push(point);
-      } else {
-        if (!upPoints.length && lastPenPoint) upPoints.push(lastPenPoint);
-        upPoints.push(point);
-      }
-      lastPenPoint = point;
-    }
-  }
-  if (penDown && downPoints.length > 1) downSegments.push(downPoints);
-  if (!penDown && upPoints.length > 1) upSegments.push(upPoints);
-  for (const segment of upSegments) drawStroke(segment, COLORS.penTravel, 1.25, [5, 5]);
-  for (const segment of downSegments) drawStroke(segment, COLORS.penSimulation, 1.6);
-  for (const event of events) drawPenEvent(event);
-}
-
-function drawCubePath(points) {
-  if (!points.length) return;
-  drawStroke(points, COLORS.cubePath, 1.4, [8, 7]);
-  const stride = Math.max(1, Math.ceil(points.length / 18));
-  for (let i = 0; i < points.length; i += stride) {
-    drawCubePose(points[i], COLORS.cubeGhost, 0.36, false);
-  }
-  drawCubePose(points[0], COLORS.cubeStart, 0.95, true);
-  drawCubeLabel(points[0], "START", COLORS.cubeStart, -1);
-  drawCubePose(points[points.length - 1], COLORS.cubeEnd, 0.95, true);
-  drawCubeLabel(points[points.length - 1], "END", COLORS.cubeEnd, 1);
-}
-
-function drawCubePose(pose, color, alpha = 1, filled = false) {
-  const center = matToCanvas(pose);
-  const size = 32 * 0.8 * getView().scale;
-  const theta = degToRad(pose.theta || 0);
-  ctx.save();
-  ctx.translate(center.x, center.y);
-  ctx.rotate(theta);
-  ctx.globalAlpha = alpha;
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
-  ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
-  if (filled) {
-    ctx.globalAlpha = alpha * 0.16;
-    ctx.fillRect(-size / 2, -size / 2, size, size);
-    ctx.globalAlpha = alpha;
-  }
-  ctx.strokeRect(-size / 2, -size / 2, size, size);
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(size / 2, 0);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawCubeLabel(pose, label, color, side = 1) {
-  const dpr = window.devicePixelRatio || 1;
-  const point = matToCanvas(pose);
-  ctx.save();
-  ctx.font = `bold ${10 * dpr}px system-ui`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  const textWidth = ctx.measureText(label).width;
-  const padX = 5 * dpr;
-  const width = textWidth + padX * 2;
-  const height = 16 * dpr;
-  const y = point.y + side * 24 * dpr;
-  ctx.fillStyle = "rgba(255,255,255,0.92)";
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1 * dpr;
-  ctx.fillRect(point.x - width / 2, y - height / 2, width, height);
-  ctx.strokeRect(point.x - width / 2, y - height / 2, width, height);
-  ctx.fillStyle = color;
-  ctx.fillText(label, point.x, y);
-  ctx.restore();
-}
-
-function drawPenEvent(event) {
-  const dpr = window.devicePixelRatio || 1;
-  const point = matToCanvas(event);
-  const isDown = event.state === "down";
-  const radius = 5 * dpr;
-  ctx.save();
-  ctx.fillStyle = isDown ? COLORS.penDownEvent : COLORS.penUpEvent;
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 1.5 * dpr;
-  ctx.beginPath();
-  ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = "#ffffff";
-  ctx.font = `bold ${10 * dpr}px system-ui`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(isDown ? "↓" : "↑", point.x, point.y - 0.5 * dpr);
-  ctx.restore();
-}
-
-function drawLegend() {
-  const dpr = window.devicePixelRatio || 1;
-  const items = [
-    ["描画線", COLORS.drawing, "solid"],
-    ["pen down 描画", COLORS.penSimulation, "solid"],
-    ["pen up 移動", COLORS.penTravel, "dash"],
-    ["pen down/up", COLORS.penDownEvent, "event"],
-    ["toio移動軌跡", COLORS.cubePath, "dash"],
-    ["toio開始", COLORS.cubeStart, "box"],
-    ["toio終了", COLORS.cubeEnd, "box"],
-    ["実機toio", COLORS.liveCube, "box"],
-  ];
-  const x = els.canvas.width - 196 * dpr;
-  const y = 50 * dpr;
-  const lineH = 20 * dpr;
-  const width = 178 * dpr;
-  const height = (items.length * lineH + 12 * dpr);
-
-  ctx.save();
-  ctx.fillStyle = "rgba(255,255,255,0.9)";
-  ctx.strokeStyle = "#d8d3c8";
-  ctx.lineWidth = 1 * dpr;
-  ctx.fillRect(x, y, width, height);
-  ctx.strokeRect(x, y, width, height);
-  ctx.font = `${11 * dpr}px system-ui`;
-  ctx.textBaseline = "middle";
-
-  items.forEach(([label, color, kind], index) => {
-    const itemY = y + 12 * dpr + index * lineH;
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.lineWidth = 2 * dpr;
-    if (kind === "dash") ctx.setLineDash([6 * dpr, 5 * dpr]);
-    if (kind === "event") {
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.arc(x + 15 * dpr, itemY, 5 * dpr, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (kind === "box") {
-      ctx.setLineDash([]);
-      ctx.strokeRect(x + 10 * dpr, itemY - 5 * dpr, 10 * dpr, 10 * dpr);
-    } else {
-      ctx.beginPath();
-      ctx.moveTo(x + 8 * dpr, itemY);
-      ctx.lineTo(x + 24 * dpr, itemY);
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    ctx.fillStyle = "#43464a";
-    ctx.fillText(label, x + 32 * dpr, itemY);
-  });
-  ctx.restore();
-}
-
 function processStroke(raw) {
   return window.PlotterCore.processStroke(raw, config);
 }
@@ -720,81 +311,6 @@ function createSimulation() {
     return window.PlotterCore.createDeadReckoningSimulation({ strokes, config, segmentSettings: deadSegmentSettings });
   }
   return window.PlotterCore.createSimulation({ strokes, config });
-}
-
-function drawAnimationCursor(commands) {
-  const point = latestPenPoint(commands);
-  const pose = latestCubePose(commands, point);
-  const penState = latestPenState(commands);
-  if (pose) drawCubePose(pose, COLORS.liveCube, 1, true);
-  if (!point) return;
-  const dpr = window.devicePixelRatio || 1;
-  const canvasPoint = matToCanvas(point);
-  ctx.save();
-  ctx.fillStyle = penState === "down" ? COLORS.penDownEvent : COLORS.penUpEvent;
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 2 * dpr;
-  ctx.beginPath();
-  ctx.arc(canvasPoint.x, canvasPoint.y, 7 * dpr, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  drawPenStateBadge(canvasPoint, penState);
-  ctx.restore();
-}
-
-function drawPenStateBadge(canvasPoint, penState) {
-  const dpr = window.devicePixelRatio || 1;
-  const label = penState === "down" ? "DOWN" : "UP";
-  ctx.font = `bold ${10 * dpr}px system-ui`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  const width = ctx.measureText(label).width + 10 * dpr;
-  const height = 16 * dpr;
-  const x = canvasPoint.x;
-  const y = canvasPoint.y - 18 * dpr;
-  ctx.fillStyle = penState === "down" ? COLORS.penDownEvent : COLORS.penUpEvent;
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 1.5 * dpr;
-  ctx.fillRect(x - width / 2, y - height / 2, width, height);
-  ctx.strokeRect(x - width / 2, y - height / 2, width, height);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillText(label, x, y);
-}
-
-function latestPenPoint(commands) {
-  for (let i = commands.length - 1; i >= 0; i -= 1) {
-    const command = commands[i];
-    if (command.penX != null) return { x: command.penX, y: command.penY };
-  }
-  return null;
-}
-
-function latestCubePose(commands, point) {
-  const poseCommand = latestPoseCommand(commands);
-  if (!poseCommand) return null;
-  if (poseCommand.x != null && poseCommand.y != null) {
-    return { x: poseCommand.x, y: poseCommand.y, theta: poseCommand.theta || 0 };
-  }
-  if (!point) return null;
-  return { ...window.PlotterCore.penToCube(point, poseCommand.theta || 0, config), theta: poseCommand.theta || 0 };
-}
-
-function latestPenState(commands) {
-  for (let i = commands.length - 1; i >= 0; i -= 1) {
-    const command = commands[i];
-    if (command.type === "pen") return command.state;
-  }
-  return "up";
-}
-
-function latestPoseCommand(commands) {
-  for (let i = commands.length - 1; i >= 0; i -= 1) {
-    const command = commands[i];
-    if ((command.type === "move" || command.type === "rotate" || command.type === "motor" || command.type === "turn") && command.theta != null) {
-      return command;
-    }
-  }
-  return null;
 }
 
 function cubeToPen(point, theta, configInput = {}) {
@@ -808,16 +324,6 @@ function cubeToPen(point, theta, configInput = {}) {
   return {
     x: point.x + offset.x,
     y: point.y + offset.y,
-  };
-}
-
-function rotatePoint(point, angleDeg) {
-  const angle = degToRad(angleDeg);
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  return {
-    x: point.x * cos - point.y * sin,
-    y: point.x * sin + point.y * cos,
   };
 }
 
@@ -903,18 +409,25 @@ function applyCommandOverrides() {
     const override = key ? commandOverrides.get(key) : null;
     if (!override) continue;
     if (command.type === "motor") {
-      ensureMotorBaseline(command);
-      if (override.speed != null) command.speed = override.speed;
-      if (override.durationMs != null) command.durationMs = override.durationMs;
-      if (override.distanceScale != null) {
-        command.distanceScale = override.distanceScale;
-        command.durationMs = roundToMotorDurationMs(Math.max(10, command.baseMotion.durationMs * command.distanceScale));
-      } else if (override.durationMs != null) {
-        command.distanceScale = motorDistanceScale(command);
+      if (command.geometry === "arc") {
+        if (override.leftSpeed != null) command.leftSpeed = override.leftSpeed;
+        if (override.rightSpeed != null) command.rightSpeed = override.rightSpeed;
+        if (override.durationMs != null) command.durationMs = override.durationMs;
+        command.manualWheelSpeeds = true;
+      } else {
+        ensureMotorBaseline(command);
+        if (override.speed != null) command.speed = override.speed;
+        if (override.durationMs != null) command.durationMs = override.durationMs;
+        if (override.distanceScale != null) {
+          command.distanceScale = override.distanceScale;
+          command.durationMs = roundToMotorDurationMs(Math.max(10, command.baseMotion.durationMs * command.distanceScale));
+        } else if (override.durationMs != null) {
+          command.distanceScale = motorDistanceScale(command);
+        }
+        command.leftSpeed = command.speed;
+        command.rightSpeed = command.speed;
+        updateStraightMotorPose(command);
       }
-      command.leftSpeed = command.speed;
-      command.rightSpeed = command.speed;
-      updateStraightMotorPose(command);
     } else if (command.type === "turn") {
       if (override.leftSpeed != null) command.leftSpeed = override.leftSpeed;
       if (override.rightSpeed != null) command.rightSpeed = override.rightSpeed;
@@ -926,6 +439,13 @@ function applyCommandOverrides() {
 }
 
 function commandOverrideFromCommand(command) {
+  if (command.type === "motor" && command.geometry === "arc" && command.manualWheelSpeeds) {
+    return {
+      leftSpeed: command.leftSpeed,
+      rightSpeed: command.rightSpeed,
+      durationMs: command.durationMs,
+    };
+  }
   if (command.type === "motor" && command.baseMotion) {
     return {
       speed: command.speed,
@@ -1173,7 +693,12 @@ function buildSimulationTimeline(commands) {
   for (let index = 0; index < commands.length; index += 1) {
     const command = commands[index];
     const durationMs = commandDurationMs(command, lastPenPoint);
-    const fromTheta = command.type === "turn" && lastTheta == null && command.angle != null ? command.theta - command.angle : lastTheta;
+    const fromTheta =
+      command.type === "turn" && lastTheta == null && command.angle != null
+        ? command.theta - command.angle
+        : command.type === "motor" && command.geometry === "arc" && command.startTheta != null
+          ? command.startTheta
+          : lastTheta;
     if (isPlayableMoveCommand(command)) {
       items.push({ command, commandIndex: index, startMs: cursorMs, endMs: cursorMs + durationMs, from: lastPenPoint, fromTheta, fromCubePose: lastCubePose });
       cursorMs += durationMs;
@@ -1247,6 +772,29 @@ function partialCommand(item, elapsedMs) {
       penY: penPoint ? penPoint.y : command.penY,
     };
   }
+  if (command.type === "motor" && command.geometry === "arc" && command.center && command.radius != null && command.startAngle != null && command.sweepAngle != null) {
+    const span = Math.max(1, item.endMs - item.startMs);
+    const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
+    const angle = command.startAngle + command.sweepAngle * t;
+    const theta = normalizeDegrees((command.startTheta ?? command.theta ?? 0) + command.sweepAngle * t);
+    const cubePoint = window.PlotterCore.pointOnCircle(command.center, command.radius, angle);
+    const penPoint = cubeToPen(cubePoint, theta, config);
+    const previewEnd = (points) => {
+      if (!Array.isArray(points)) return points;
+      const count = Math.max(1, Math.floor((points.length - 1) * t));
+      return points.slice(0, count + 1);
+    };
+    return {
+      ...command,
+      x: cubePoint.x,
+      y: cubePoint.y,
+      theta,
+      penX: penPoint.x,
+      penY: penPoint.y,
+      cubePreviewPoints: previewEnd(command.cubePreviewPoints),
+      penPreviewPoints: previewEnd(command.penPreviewPoints),
+    };
+  }
   if (command.type === "motor" && command.x != null && command.y != null && item.fromCubePose) {
     const span = Math.max(1, item.endMs - item.startMs);
     const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
@@ -1301,14 +849,15 @@ function renderDeadSegmentsEditor() {
     return;
   }
   const index = segments.findIndex((item) => item.id === segment.id) + 1;
-  const title = segment.kind === "draw" ? "draw straight" : "travel straight";
+  const shape = segment.geometry === "arc" ? "arc" : "straight";
+  const title = `${segment.kind === "draw" ? "draw" : "travel"} ${shape}`;
   const distanceControl =
     segment.kind === "travel" ? segmentInputTemplate(segment.id, "distanceScale", "distance", segment.distanceScale, 0.05) : "";
   els.deadSegmentsEditor.innerHTML = `
     <div class="segment-card">
       <div class="segment-title">#${index} ${title}</div>
       <div class="segment-meta">長さ ${segment.lengthMm.toFixed(1)}mm / 角度 ${segment.heading.toFixed(0)}° / start (${segment.start.x.toFixed(1)}, ${segment.start.y.toFixed(1)}) → end (${segment.end.x.toFixed(1)}, ${segment.end.y.toFixed(1)})</div>
-      <div class="segment-meta">直進</div>
+      <div class="segment-meta">${segment.geometry === "arc" ? "円弧" : "直進"}</div>
       <div class="segment-fields">
         ${segmentInputTemplate(segment.id, "speed", "速度", segment.speed, 1)}
         ${segmentInputTemplate(segment.id, "durationScale", "時間倍率", segment.durationScale, 0.05)}
@@ -1317,86 +866,6 @@ function renderDeadSegmentsEditor() {
       </div>
     </div>
   `;
-}
-
-function renderToioCommandOutput() {
-  if (!els.toioCommandOutput) return;
-  if (!simulationValid || !simulation) {
-    els.toioCommandOutput.textContent = "シミュレーション後に表示されます。";
-    return;
-  }
-  els.toioCommandOutput.textContent = isDeadMode() ? formatDeadToioCommands(simulation.commands) : formatPositionToioCommands(simulation.commands);
-}
-
-function formatDeadToioCommands(commands) {
-  const lines = [];
-  let index = 1;
-  for (const command of commands) {
-    const formatted = formatDeadToioCommand(command);
-    if (!formatted) continue;
-    lines.push(`${String(index).padStart(2, "0")}. ${formatted}`);
-    index += 1;
-  }
-  return lines.join("\n") || "toioコマンドはありません。";
-}
-
-function formatDeadToioCommand(command) {
-  if (command.type === "pen") {
-    if (command.state === "up") return `昇降用: UP 速度:${config.upMotorSpeed}, ${formatSeconds(config.upDurationMs)}`;
-    return `昇降用: DOWN 速度:${config.downMotorSpeed}, ${formatSeconds(config.downDurationMs)}`;
-  }
-  if (command.type === "turn") {
-    const speeds = turnWheelSpeeds(command);
-    return `移動用: 回転 ${formatAngle(command.angle)} / 右:${speeds.right}, 左:${speeds.left}, ${formatSeconds(command.durationMs)}`;
-  }
-  if (command.type === "motor") {
-    const label = command.kind === "draw" ? "描画直進" : "移動直進";
-    return `移動用: ${label} / 右:${Math.round(command.rightSpeed)}, 左:${Math.round(command.leftSpeed)}, ${formatSeconds(command.durationMs)}`;
-  }
-  if (command.type === "wait") return `待機: ${formatSeconds(command.ms)}`;
-  return null;
-}
-
-function formatPositionToioCommands(commands) {
-  const lines = [];
-  let index = 1;
-  for (const command of commands) {
-    const formatted = formatPositionToioCommand(command);
-    if (!formatted) continue;
-    lines.push(`${String(index).padStart(2, "0")}. ${formatted}`);
-    index += 1;
-  }
-  return lines.join("\n") || "toioコマンドはありません。";
-}
-
-function formatPositionToioCommand(command) {
-  if (command.type === "pen") {
-    if (command.state === "up") return `昇降用: UP 速度:${config.upMotorSpeed}, ${formatSeconds(config.upDurationMs)}`;
-    return `昇降用: DOWN 速度:${config.downMotorSpeed}, ${formatSeconds(config.downDurationMs)}`;
-  }
-  if (command.type === "move" || command.type === "rotate") {
-    return `移動用: ${command.type} x:${command.x.toFixed(1)}, y:${command.y.toFixed(1)}, θ:${command.theta.toFixed(0)}, speed:${command.speed}`;
-  }
-  if (command.type === "wait") return `待機: ${formatSeconds(command.ms)}`;
-  return null;
-}
-
-function turnWheelSpeeds(command) {
-  const direction = command.angle >= 0 ? 1 : -1;
-  const base = Math.abs(config.deadTurnSpeed);
-  const trim = config.deadTurnBalanceTrim;
-  return {
-    left: Math.round(direction * clamp(base + trim, 0, 255)),
-    right: Math.round(-direction * clamp(base - trim, 0, 255)),
-  };
-}
-
-function formatSeconds(ms) {
-  return `${(Math.max(0, ms || 0) / 1000).toFixed(2).replace(/\.00$/, "")}s`;
-}
-
-function formatAngle(angle) {
-  return `${angle >= 0 ? "+" : ""}${Number(angle || 0).toFixed(0)}°`;
 }
 
 function renderToioCommandOutput() {
@@ -1438,6 +907,15 @@ function commandControlsTemplate(command, index) {
     `;
   }
   if (command.type === "motor") {
+    if (command.geometry === "arc") {
+      return `
+      <div class="command-fields">
+        ${commandInputTemplate(index, "leftSpeed", "L", command.leftSpeed, 1, -255, 255)}
+        ${commandInputTemplate(index, "rightSpeed", "R", command.rightSpeed, 1, -255, 255)}
+        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || 10, 10, 10, 60000)}
+      </div>
+    `;
+    }
     const distanceInput =
       command.kind === "travel" ? commandInputTemplate(index, "distanceScale", "distance", motorDistanceScale(command), 0.05, 0.1, 2) : "";
     return `
@@ -1521,7 +999,7 @@ function updateCommandEdit(input, { render = true } = {}) {
   const command = simulation.commands[index];
   if (!command || !key) return;
   if (input.value === "" || input.value === "-") return;
-  if (command.type === "motor" && (key === "speed" || key === "durationMs" || key === "distanceScale")) {
+  if (command.type === "motor" && command.geometry !== "arc" && (key === "speed" || key === "durationMs" || key === "distanceScale")) {
     ensureMotorBaseline(command);
   }
   if (command.type === "turn" && (key === "leftSpeed" || key === "rightSpeed" || key === "durationMs") && !command.manualWheelSpeeds) {
@@ -1532,14 +1010,17 @@ function updateCommandEdit(input, { render = true } = {}) {
   let value = Number(input.value);
   if ((command.type === "turn" || command.type === "motor") && key === "durationMs") {
     const minMs = command.type === "turn" ? MIN_TURN_DURATION_MS : 10;
-    value = roundToMotorDurationMs(Math.max(minMs, value));
+    value = command.type === "motor" && command.geometry === "arc" ? Math.round(Math.max(minMs, value) / 10) * 10 : roundToMotorDurationMs(Math.max(minMs, value));
   }
   if (command.type === "motor" && key === "distanceScale") {
     value = clamp(value, 0.1, 2);
     command.durationMs = roundToMotorDurationMs(Math.max(10, command.baseMotion.durationMs * value));
   }
   command[key] = value;
-  if (command.type === "motor" && (key === "speed" || key === "durationMs" || key === "distanceScale")) {
+  if (command.type === "motor" && command.geometry === "arc") {
+    if (key === "leftSpeed" || key === "rightSpeed") command[key] = clamp(value, -255, 255);
+    if (key === "leftSpeed" || key === "rightSpeed" || key === "durationMs") command.manualWheelSpeeds = true;
+  } else if (command.type === "motor" && (key === "speed" || key === "durationMs" || key === "distanceScale")) {
     if (key !== "distanceScale") command.distanceScale = motorDistanceScale(command);
     command.leftSpeed = command.speed;
     command.rightSpeed = command.speed;
@@ -1635,10 +1116,6 @@ function manualTurnAngle(command) {
   return angularSpeedDegPerSec * ((command.durationMs || 0) / 1000);
 }
 
-function normalizeDegrees(value) {
-  return ((value % 360) + 360) % 360;
-}
-
 function jumpToCommand(index) {
   if (!simulationValid || !simulation?.commands?.length) return;
   if (simulationAnimation?.frameId) cancelAnimationFrame(simulationAnimation.frameId);
@@ -1677,7 +1154,8 @@ function formatDeadToioCommand(command) {
     return `move: turn ${formatAngle(command.angle)} / R:${speeds.right}, L:${speeds.left}, ${formatSeconds(command.durationMs)}`;
   }
   if (command.type === "motor") {
-    const label = command.kind === "draw" ? "draw straight" : "travel straight";
+    const label = command.kind === "draw" ? `draw ${command.geometry === "arc" ? "arc" : "straight"}` : "travel straight";
+    if (command.geometry === "arc") return `move: ${label} / R:${Math.round(command.rightSpeed)}, L:${Math.round(command.leftSpeed)}, ${formatSeconds(command.durationMs)}`;
     return `move: ${label} / speed:${motorStraightSpeed(command)}, ${formatSeconds(command.durationMs)}`;
   }
   if (command.type === "wait") return `wait: ${formatSeconds(command.ms)}`;
@@ -1708,14 +1186,6 @@ function turnWheelSpeeds(command) {
     };
   }
   return window.PlotterCore.computeTurnWheelSpeeds(command.angle || 0, config.deadTurnSpeed, config.deadTurnBalanceTrim);
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 const TURN_CALIBRATION_TESTS = [
@@ -1789,7 +1259,7 @@ function updateTurnCalibrationInput(input) {
   entry.runs = entry.runs || [];
   entry.runs[runIndex] = input.value === "" || input.value === "-" ? "" : Number(input.value);
   turnCalibrationLog[testId] = entry;
-  saveTurnCalibrationLog();
+  saveTurnCalibrationLog(turnCalibrationLog);
 }
 
 function finalizeTurnCalibrationInput() {
@@ -1798,7 +1268,7 @@ function finalizeTurnCalibrationInput() {
 
 function clearTurnCalibrationLog() {
   turnCalibrationLog = {};
-  localStorage.removeItem("toioPlotterTurnCalibrationLog");
+  clearStoredTurnCalibrationLog();
   simulation = null;
   invalidateSimulation("回転テストログと回転倍率をリセットしました");
   renderTurnCalibration();
@@ -1859,32 +1329,8 @@ function selectAdjacentDrawSegment(delta) {
 }
 
 function findClickedDrawSegment(event) {
-  if (!isDeadMode() || !simulationValid || !simulation) return null;
-  const rect = els.canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  const point = {
-    x: (event.clientX - rect.left) * dpr,
-    y: (event.clientY - rect.top) * dpr,
-  };
-  const threshold = 10 * dpr;
-  let best = null;
-  for (const segment of getDeadSegments()) {
-    const start = matToCanvas(segment.start);
-    const end = matToCanvas(segment.end);
-    const d = distanceToCanvasSegment(point, start, end);
-    if (d <= threshold && (!best || d < best.distance)) best = { segment, distance: d };
-  }
-  return best?.segment || null;
-}
-
-function distanceToCanvasSegment(point, start, end) {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const lengthSq = dx * dx + dy * dy;
-  if (!lengthSq) return Math.hypot(point.x - start.x, point.y - start.y);
-  const t = clamp(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSq, 0, 1);
-  const closest = { x: start.x + dx * t, y: start.y + dy * t };
-  return Math.hypot(point.x - closest.x, point.y - closest.y);
+  if (!simulationValid) return null;
+  return canvasRenderer.findClickedDrawSegment(event);
 }
 
 function updateDeadSegmentSetting(input) {
@@ -1892,7 +1338,7 @@ function updateDeadSegmentSetting(input) {
   const key = input.dataset.segmentKey;
   if (!segmentId || !key) return;
   deadSegmentSettings[segmentId] = { ...(deadSegmentSettings[segmentId] || {}), [key]: Number(input.value) };
-  saveDeadSegmentSettings();
+  saveDeadSegmentSettings(deadSegmentSettings);
   if (!isDeadMode() || !simulation?.segments?.length) return;
   stopSimulationAnimation();
   simulation = createSimulation();
@@ -2050,7 +1496,7 @@ function exportDrawing() {
     config,
     strokes,
     deadSegmentSettings,
-    commandOverrides: serializeCommandOverrides(),
+    commandOverrides: serializeCommandOverrides(commandOverrides),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -2117,12 +1563,12 @@ function importDrawingPayload(payload, reason) {
   deadSegmentSettings = payload.deadSegmentSettings && typeof payload.deadSegmentSettings === "object" ? payload.deadSegmentSettings : {};
   commandOverrides = loadCommandOverrides(payload.commandOverrides);
   selectedDeadSegmentId = null;
-  saveDeadSegmentSettings();
+  saveDeadSegmentSettings(deadSegmentSettings);
   renderDeadSegmentsEditor();
   if (payload.config) {
     config = { ...config, ...payload.config };
     syncConfigToForm();
-    saveConfig();
+    saveConfig(config);
   }
   buildImportedSimulation(reason);
   draw();
@@ -2174,28 +1620,6 @@ function pointerUp(event) {
   }
   activeStroke = null;
   draw();
-}
-
-function distance(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
-function turnAngle(a, b, c) {
-  const ab = { x: a.x - b.x, y: a.y - b.y };
-  const cb = { x: c.x - b.x, y: c.y - b.y };
-  const denom = Math.hypot(ab.x, ab.y) * Math.hypot(cb.x, cb.y);
-  if (!denom) return 0;
-  const dot = (ab.x * cb.x + ab.y * cb.y) / denom;
-  const angle = (Math.acos(clamp(dot, -1, 1)) * 180) / Math.PI;
-  return 180 - angle;
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function degToRad(deg) {
-  return (deg * Math.PI) / 180;
 }
 
 function sleep(ms) {
@@ -2340,12 +1764,21 @@ function roundToMotorDurationMs(durationMs) {
 }
 
 async function runDeadMotor(command) {
-  const speed = command.speed != null ? command.speed : motorStraightSpeed(command);
-  const leftSpeed = clamp(speed, -255, 255);
-  const rightSpeed = clamp(speed, -255, 255);
+  const leftSpeed = clamp(command.leftSpeed ?? command.speed ?? motorStraightSpeed(command), -255, 255);
+  const rightSpeed = clamp(command.rightSpeed ?? command.speed ?? motorStraightSpeed(command), -255, 255);
   log(`${command.kind}: L=${leftSpeed} R=${rightSpeed} ${command.durationMs}ms`);
-  await moveCube.timedMotorPair(leftSpeed, rightSpeed, command.durationMs);
-  await sleep(command.durationMs);
+  await runTimedMotorPairForDuration(leftSpeed, rightSpeed, command.durationMs);
+}
+
+async function runTimedMotorPairForDuration(leftSpeed, rightSpeed, durationMs) {
+  let remaining = Math.max(0, durationMs || 0);
+  while (remaining > 0) {
+    if (abortRun) throw new Error("Emergency stop");
+    const chunkMs = Math.min(2550, remaining);
+    await moveCube.timedMotorPair(leftSpeed, rightSpeed, chunkMs);
+    await sleep(chunkMs);
+    remaining -= chunkMs;
+  }
 }
 
 function refreshMovePoseStatus() {
