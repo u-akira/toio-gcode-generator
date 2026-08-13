@@ -243,6 +243,16 @@ function saveDeadSegmentSettings() {
   localStorage.setItem("toioPlotterDeadSegmentSettings", JSON.stringify(deadSegmentSettings));
 }
 
+function serializeCommandOverrides() {
+  return Object.fromEntries(commandOverrides.entries());
+}
+
+function loadCommandOverrides(value) {
+  if (Array.isArray(value)) return new Map(value);
+  if (value && typeof value === "object") return new Map(Object.entries(value));
+  return new Map();
+}
+
 function loadTurnCalibrationLog() {
   if (resetTurnCalibrationLogOnLoad) {
     localStorage.removeItem("toioPlotterTurnCalibrationLog");
@@ -856,6 +866,24 @@ function runSimulation() {
   renderToioCommandOutput();
   if (simulationValid) startSimulationAnimation();
   draw();
+}
+
+function buildImportedSimulation(reason) {
+  stopSimulationAnimation();
+  simulation = createSimulation();
+  applyCommandOverrides();
+  if (!isDeadMode()) strokes = simulation.processedStrokes;
+  const hasErrors = simulation.errors.length > 0;
+  simulationValid = !hasErrors && simulation.commands.length > 0;
+  activeSimulationCommandIndex = -1;
+  if (simulationValid && isDeadMode() && !getSelectedDeadSegment()) selectFirstDeadDrawSegment();
+  syncRunButton();
+  updateSb3ExportButton();
+  setPill(els.simStatus, simulationValid ? "成功" : "失敗", simulationValid ? "ok" : "error");
+  if (reason) log(reason);
+  if (hasErrors) log(`Import simulation failed:\n${simulation.errors.join("\n")}`);
+  renderDeadSegmentsEditor();
+  renderToioCommandOutput();
 }
 
 function captureCommandOverrides() {
@@ -2014,12 +2042,15 @@ async function emergencyStop() {
 }
 
 function exportDrawing() {
+  captureCommandOverrides();
   const payload = {
     version: 1,
     createdAt: new Date().toISOString(),
     mat: MAT,
     config,
     strokes,
+    deadSegmentSettings,
+    commandOverrides: serializeCommandOverrides(),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -2083,14 +2114,17 @@ async function importDrawing(file) {
 
 function importDrawingPayload(payload, reason) {
   strokes = Array.isArray(payload.strokes) ? payload.strokes : [];
-  resetDeadSegmentSettings();
+  deadSegmentSettings = payload.deadSegmentSettings && typeof payload.deadSegmentSettings === "object" ? payload.deadSegmentSettings : {};
+  commandOverrides = loadCommandOverrides(payload.commandOverrides);
+  selectedDeadSegmentId = null;
+  saveDeadSegmentSettings();
+  renderDeadSegmentsEditor();
   if (payload.config) {
     config = { ...config, ...payload.config };
     syncConfigToForm();
     saveConfig();
   }
-  simulation = null;
-  invalidateSimulation(reason);
+  buildImportedSimulation(reason);
   draw();
 }
 
