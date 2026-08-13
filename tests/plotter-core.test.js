@@ -186,6 +186,31 @@ test("dead reckoning inserts travel between separate strokes", () => {
   assert.equal(result.segments[1].kind, "travel");
 });
 
+test("dead reckoning travel distance scale shortens pen-up travel only", () => {
+  const strokes = [
+    makeStroke([
+      [180, 225],
+      [320, 225],
+    ]),
+    makeStroke([
+      [180, 275],
+      [320, 275],
+    ]),
+  ];
+  const base = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTravelDistanceScale: 1 })).plan(strokes);
+  const shortened = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadTravelDistanceScale: 0.5 })).plan(strokes);
+  const baseTravel = base.commands.find((command) => command.type === "motor" && command.kind === "travel");
+  const shortenedTravel = shortened.commands.find((command) => command.type === "motor" && command.kind === "travel");
+  const baseDraw = base.commands.find((command) => command.type === "motor" && command.kind === "draw");
+  const shortenedDraw = shortened.commands.find((command) => command.type === "motor" && command.kind === "draw");
+
+  assert.ok(baseTravel);
+  assert.ok(shortenedTravel);
+  assert.ok(shortenedTravel.durationMs < baseTravel.durationMs);
+  assert.ok(Math.abs(shortenedTravel.durationMs - baseTravel.durationMs / 2) <= 10);
+  assert.equal(shortenedDraw.durationMs, baseDraw.durationMs);
+});
+
 test("dead reckoning changes draw direction with motor-only transition steps", () => {
   const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: -48, penOffsetY: 0 })).plan([
     makeStroke([

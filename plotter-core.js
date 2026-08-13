@@ -16,7 +16,7 @@
 
   const NATIVE_MAT = { ...MAT };
   const DEFAULT_CONFIG = {
-    configVersion: 24,
+    configVersion: 25,
     safeScale: 0.75,
     fixedHeading: 0,
     penOffsetX: -48,
@@ -44,6 +44,7 @@
     deadTurnMsPer90: 660,
     deadMmPerSecAtDrawSpeed: 30,
     deadMmPerSecAtTravelSpeed: 70,
+    deadTravelDistanceScale: 1,
   };
   const MIN_TURN_DURATION_MS = 150;
 
@@ -282,6 +283,7 @@
       const baseMmPerSec = kind === "draw" ? config.deadMmPerSecAtDrawSpeed : config.deadMmPerSecAtTravelSpeed;
       const speed = clamp(Number(saved.speed ?? baseSpeed), 1, 255);
       const durationScale = clamp(Number(saved.durationScale ?? 1), 0.1, 5);
+      const distanceScale = kind === "travel" ? clamp(Number(saved.distanceScale ?? config.deadTravelDistanceScale), 0.1, 2) : 1;
       const steeringTrim = clamp(Number(saved.steeringTrim ?? 0), -80, 80);
       const startCube = penToCube(start, heading, config);
       const endCube = penToCube(end, heading, config);
@@ -297,8 +299,9 @@
         turnAngle: turnAngleValue,
         speed,
         durationScale,
+        distanceScale,
         steeringTrim,
-        durationMs: computeStraightDurationMs(lengthMm, speed, baseSpeed, baseMmPerSec, durationScale),
+        durationMs: computeStraightDurationMs(lengthMm, speed, baseSpeed, baseMmPerSec, durationScale * distanceScale),
         turnDurationMs: computeTurnDurationMs(turnAngleValue, config),
       };
     }
@@ -392,7 +395,7 @@
         this.config.travelSpeed,
         this.config.travelSpeed,
         this.config.deadMmPerSecAtTravelSpeed,
-        segment.durationScale,
+        clamp(Number(this.config.deadTravelDistanceScale), 0.1, 2),
       );
       const penEnd = cubeToPen(targetPose, travelHeading, this.config);
       plan.commands.push({

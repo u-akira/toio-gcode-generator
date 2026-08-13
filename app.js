@@ -59,6 +59,7 @@ const els = {
   simPauseBtn: document.getElementById("simPauseBtn"),
   simPrevStepBtn: document.getElementById("simPrevStepBtn"),
   simNextStepBtn: document.getElementById("simNextStepBtn"),
+  copyCommandReportBtn: document.getElementById("copyCommandReportBtn"),
   turnCalibrationOutput: document.getElementById("turnCalibrationOutput"),
   clearTurnLogBtn: document.getElementById("clearTurnLogBtn"),
 };
@@ -77,6 +78,7 @@ const configInputs = [
   "deadTurnMsPer90",
   "deadMmPerSecAtDrawSpeed",
   "deadMmPerSecAtTravelSpeed",
+  "deadTravelDistanceScale",
   "smoothing",
   "minPointDistance",
   "cornerAngle",
@@ -109,6 +111,7 @@ let simulationValid = false;
 let simulationAnimation = null;
 let activeSimulationCommandIndex = -1;
 let deadSegmentSettings = loadDeadSegmentSettings();
+let commandOverrides = new Map();
 let turnCalibrationLog = loadTurnCalibrationLog();
 let selectedDeadSegmentId = null;
 let running = false;
@@ -201,6 +204,10 @@ function loadConfig() {
       saved.deadTurnMsPer90 = DEFAULT_CONFIG.deadTurnMsPer90;
       changed = true;
     }
+    if (savedVersion < 25) {
+      saved.deadTravelDistanceScale = DEFAULT_CONFIG.deadTravelDistanceScale;
+      changed = true;
+    }
     const loaded = { ...DEFAULT_CONFIG, ...saved, configVersion: DEFAULT_CONFIG.configVersion };
     if (changed || saved.configVersion !== DEFAULT_CONFIG.configVersion) {
       localStorage.setItem("toioPlotterConfig", JSON.stringify(loaded));
@@ -254,6 +261,7 @@ function saveTurnCalibrationLog() {
 
 function resetDeadSegmentSettings() {
   deadSegmentSettings = {};
+  commandOverrides = new Map();
   selectedDeadSegmentId = null;
   saveDeadSegmentSettings();
   renderDeadSegmentsEditor();
@@ -408,7 +416,7 @@ function pointInBounds(point, bounds) {
 }
 
 function draw() {
-  els.canvas.style.cursor = isDeadMode() && simulationValid && getDrawSegments().length ? "pointer" : "crosshair";
+  els.canvas.style.cursor = isDeadMode() && simulationValid && getDeadSegments().length ? "pointer" : "crosshair";
   ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
   drawMat();
   for (const stroke of strokes) drawStroke(stroke.processed || stroke.raw, COLORS.drawing, 2.2);
@@ -431,9 +439,9 @@ function draw() {
 }
 
 function drawDeadSegmentSelectionOverlay() {
-  const drawSegments = getDrawSegments();
-  if (!isDeadMode() || !drawSegments.length) return;
-  for (const segment of drawSegments) {
+  const segments = getDeadSegments();
+  if (!isDeadMode() || !segments.length) return;
+  for (const segment of segments) {
     const selected = segment.id === selectedDeadSegmentId;
     drawSegmentHighlight(segment, selected);
   }
@@ -806,7 +814,9 @@ function rotatePoint(point, angleDeg) {
 function runSimulation() {
   applyConfigFromForm({ invalidate: false });
   stopSimulationAnimation();
+  captureCommandOverrides();
   simulation = createSimulation();
+  applyCommandOverrides();
   if (!isDeadMode()) strokes = simulation.processedStrokes;
   if (!simulation.commands.length) {
     simulationValid = false;
@@ -840,12 +850,81 @@ function runSimulation() {
       );
     }
   }
-  if (simulationValid && isDeadMode() && !getSelectedDrawSegment()) selectFirstDeadDrawSegment();
+  if (simulationValid && isDeadMode() && !getSelectedDeadSegment()) selectFirstDeadDrawSegment();
   updateSb3ExportButton();
   renderDeadSegmentsEditor();
   renderToioCommandOutput();
   if (simulationValid) startSimulationAnimation();
   draw();
+}
+
+function captureCommandOverrides() {
+  if (!simulation?.commands?.length) return;
+  for (const [index, command] of simulation.commands.entries()) {
+    const key = commandOverrideKey(command, index, simulation.commands);
+    if (!key) continue;
+    const override = commandOverrideFromCommand(command);
+    if (override) commandOverrides.set(key, override);
+  }
+}
+
+function applyCommandOverrides() {
+  if (!simulation?.commands?.length || !commandOverrides.size) return;
+  for (const [index, command] of simulation.commands.entries()) {
+    const key = commandOverrideKey(command, index, simulation.commands);
+    const override = key ? commandOverrides.get(key) : null;
+    if (!override) continue;
+    if (command.type === "motor") {
+      ensureMotorBaseline(command);
+      if (override.speed != null) command.speed = override.speed;
+      if (override.durationMs != null) command.durationMs = override.durationMs;
+      if (override.distanceScale != null) {
+        command.distanceScale = override.distanceScale;
+        command.durationMs = roundToMotorDurationMs(Math.max(10, command.baseMotion.durationMs * command.distanceScale));
+      } else if (override.durationMs != null) {
+        command.distanceScale = motorDistanceScale(command);
+      }
+      command.leftSpeed = command.speed;
+      command.rightSpeed = command.speed;
+      updateStraightMotorPose(command);
+    } else if (command.type === "turn") {
+      if (override.leftSpeed != null) command.leftSpeed = override.leftSpeed;
+      if (override.rightSpeed != null) command.rightSpeed = override.rightSpeed;
+      if (override.durationMs != null) command.durationMs = override.durationMs;
+      command.manualWheelSpeeds = true;
+      updateManualTurnPose(command, index);
+    }
+  }
+}
+
+function commandOverrideFromCommand(command) {
+  if (command.type === "motor" && command.baseMotion) {
+    return {
+      speed: command.speed,
+      durationMs: command.durationMs,
+      distanceScale: command.distanceScale,
+    };
+  }
+  if (command.type === "turn" && command.manualWheelSpeeds) {
+    return {
+      leftSpeed: command.leftSpeed,
+      rightSpeed: command.rightSpeed,
+      durationMs: command.durationMs,
+    };
+  }
+  return null;
+}
+
+function commandOverrideKey(command, index, commands) {
+  if (!command || (command.type !== "motor" && command.type !== "turn")) return null;
+  const role = command.role || "";
+  const segmentId = command.segmentId || "";
+  const kind = command.kind || "";
+  const occurrence = commands
+    .slice(0, index + 1)
+    .filter((item) => item.type === command.type && (item.role || "") === role && (item.segmentId || "") === segmentId && (item.kind || "") === kind)
+    .length;
+  return [command.type, kind, role, segmentId, occurrence].join("|");
 }
 
 function startSimulationAnimation() {
@@ -961,6 +1040,94 @@ function syncSimulationControls() {
   }
   if (els.simPrevStepBtn) els.simPrevStepBtn.disabled = !enabled;
   if (els.simNextStepBtn) els.simNextStepBtn.disabled = !enabled;
+  if (els.copyCommandReportBtn) els.copyCommandReportBtn.disabled = !enabled;
+}
+
+function buildCommandReportText() {
+  if (!simulationValid || !simulation?.commands?.length) return "";
+  const lines = [
+    "toio plotter calibration report",
+    `mode: ${isDeadMode() ? "dead reckoning" : "position id"}`,
+    "",
+    "settings:",
+    `drawSpeed: ${config.drawSpeed}`,
+    `travelSpeed: ${config.travelSpeed}`,
+    `deadTurnSpeed: ${config.deadTurnSpeed}`,
+    `deadTurnBalanceTrim: ${config.deadTurnBalanceTrim}`,
+    `deadTurnMsPer90: ${config.deadTurnMsPer90}`,
+    `deadMmPerSecAtDrawSpeed: ${config.deadMmPerSecAtDrawSpeed}`,
+    `deadMmPerSecAtTravelSpeed: ${config.deadMmPerSecAtTravelSpeed}`,
+    `deadTravelDistanceScale: ${config.deadTravelDistanceScale}`,
+    `upMotorSpeed: ${config.upMotorSpeed}`,
+    `upDurationMs: ${config.upDurationMs}`,
+    `downMotorSpeed: ${config.downMotorSpeed}`,
+    `downDurationMs: ${config.downDurationMs}`,
+    `settleMs: ${config.settleMs}`,
+    "",
+    "commands:",
+    ...simulation.commands.map((command, index) => `${String(index + 1).padStart(2, "0")}. ${formatCommandForReport(command)}`),
+  ];
+  if (isDeadMode() && simulation.segments?.length) {
+    lines.push("", "segments:");
+    for (const segment of simulation.segments) {
+      lines.push(
+        `${segment.id}: ${segment.kind} length:${segment.lengthMm.toFixed(1)}mm heading:${segment.heading.toFixed(0)} ` +
+          `speed:${segment.speed} durationScale:${segment.durationScale.toFixed(2)} ` +
+          `distanceScale:${(segment.distanceScale ?? 1).toFixed(2)} steeringTrim:${segment.steeringTrim}`,
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
+function formatCommandForReport(command) {
+  const label = isDeadMode() ? formatDeadToioCommand(command) : formatPositionToioCommand(command);
+  if (!command || !label) return "";
+  if (command.type === "motor") {
+    const details = [
+      `left:${Math.round(command.leftSpeed ?? motorStraightSpeed(command))}`,
+      `right:${Math.round(command.rightSpeed ?? motorStraightSpeed(command))}`,
+      `durationMs:${command.durationMs || 0}`,
+      `distanceScale:${motorDistanceScale(command).toFixed(2)}`,
+    ];
+    if (command.segmentId) details.push(`segment:${command.segmentId}`);
+    if (command.role) details.push(`role:${command.role}`);
+    return `${label} (${details.join(", ")})`;
+  }
+  if (command.type === "turn") {
+    const speeds = turnWheelSpeeds(command);
+    return `${label} (left:${speeds.left}, right:${speeds.right}, durationMs:${command.durationMs || 0})`;
+  }
+  if (command.type === "pen") {
+    return `${label} (durationMs:${getPenCommandDuration(command)})`;
+  }
+  return label;
+}
+
+async function copyCommandReport() {
+  const text = buildCommandReportText();
+  if (!text) {
+    log("コピーできるシミュレーション結果がありません。");
+    return;
+  }
+  await copyText(text);
+  log("コマンド報告テキストをコピーしました。");
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }
 
 function getAnimatedCommands() {
@@ -1095,25 +1262,29 @@ function renderDeadSegmentsEditor() {
     els.deadSegmentsEditor.innerHTML = `<div class="segment-empty">Dead reckoning モードでシミュレーションすると調整できます。</div>`;
     return;
   }
-  const drawSegments = getDrawSegments();
-  if (!drawSegments.length) {
+  const segments = getDeadSegments();
+  if (!segments.length) {
     els.deadSegmentsEditor.innerHTML = `<div class="segment-empty">シミュレーション後、キャンバス上の描画線分を選択してください。</div>`;
     return;
   }
-  const segment = getSelectedDrawSegment();
+  const segment = getSelectedDeadSegment();
   if (!segment) {
     els.deadSegmentsEditor.innerHTML = `<div class="segment-empty">キャンバス上の描画線分を選択してください。</div>`;
     return;
   }
-  const index = drawSegments.findIndex((item) => item.id === segment.id) + 1;
+  const index = segments.findIndex((item) => item.id === segment.id) + 1;
+  const title = segment.kind === "draw" ? "draw straight" : "travel straight";
+  const distanceControl =
+    segment.kind === "travel" ? segmentInputTemplate(segment.id, "distanceScale", "distance", segment.distanceScale, 0.05) : "";
   els.deadSegmentsEditor.innerHTML = `
     <div class="segment-card">
-      <div class="segment-title">#${index} 描画線分</div>
+      <div class="segment-title">#${index} ${title}</div>
       <div class="segment-meta">長さ ${segment.lengthMm.toFixed(1)}mm / 角度 ${segment.heading.toFixed(0)}° / start (${segment.start.x.toFixed(1)}, ${segment.start.y.toFixed(1)}) → end (${segment.end.x.toFixed(1)}, ${segment.end.y.toFixed(1)})</div>
       <div class="segment-meta">直進</div>
       <div class="segment-fields">
         ${segmentInputTemplate(segment.id, "speed", "速度", segment.speed, 1)}
         ${segmentInputTemplate(segment.id, "durationScale", "時間倍率", segment.durationScale, 0.05)}
+        ${distanceControl}
         ${segmentInputTemplate(segment.id, "steeringTrim", "直進補正", segment.steeringTrim, 1)}
       </div>
     </div>
@@ -1239,10 +1410,13 @@ function commandControlsTemplate(command, index) {
     `;
   }
   if (command.type === "motor") {
+    const distanceInput =
+      command.kind === "travel" ? commandInputTemplate(index, "distanceScale", "distance", motorDistanceScale(command), 0.05, 0.1, 2) : "";
     return `
       <div class="command-fields">
         ${commandInputTemplate(index, "speed", "speed", motorStraightSpeed(command), 1, -255, 255)}
-        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || MIN_TURN_DURATION_MS, 10, MIN_TURN_DURATION_MS, 2550)}
+        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || 10, 10, 10, 2550)}
+        ${distanceInput}
       </div>
     `;
   }
@@ -1265,6 +1439,12 @@ function commandControlsTemplate(command, index) {
 function motorStraightSpeed(command) {
   if (command.speed != null) return command.speed;
   return Math.round(((command.leftSpeed || 0) + (command.rightSpeed || 0)) / 2);
+}
+
+function motorDistanceScale(command) {
+  if (command.distanceScale != null) return command.distanceScale;
+  if (command.baseMotion?.durationMs) return (command.durationMs || 0) / Math.max(1, command.baseMotion.durationMs);
+  return 1;
 }
 
 function displayCommandDurationMs(index) {
@@ -1313,7 +1493,7 @@ function updateCommandEdit(input, { render = true } = {}) {
   const command = simulation.commands[index];
   if (!command || !key) return;
   if (input.value === "" || input.value === "-") return;
-  if (command.type === "motor" && (key === "speed" || key === "durationMs")) {
+  if (command.type === "motor" && (key === "speed" || key === "durationMs" || key === "distanceScale")) {
     ensureMotorBaseline(command);
   }
   if (command.type === "turn" && (key === "leftSpeed" || key === "rightSpeed" || key === "durationMs") && !command.manualWheelSpeeds) {
@@ -1326,8 +1506,13 @@ function updateCommandEdit(input, { render = true } = {}) {
     const minMs = command.type === "turn" ? MIN_TURN_DURATION_MS : 10;
     value = roundToMotorDurationMs(Math.max(minMs, value));
   }
+  if (command.type === "motor" && key === "distanceScale") {
+    value = clamp(value, 0.1, 2);
+    command.durationMs = roundToMotorDurationMs(Math.max(10, command.baseMotion.durationMs * value));
+  }
   command[key] = value;
-  if (command.type === "motor" && (key === "speed" || key === "durationMs")) {
+  if (command.type === "motor" && (key === "speed" || key === "durationMs" || key === "distanceScale")) {
+    if (key !== "distanceScale") command.distanceScale = motorDistanceScale(command);
     command.leftSpeed = command.speed;
     command.rightSpeed = command.speed;
     updateStraightMotorPose(command);
@@ -1336,6 +1521,9 @@ function updateCommandEdit(input, { render = true } = {}) {
     command.manualWheelSpeeds = true;
     updateManualTurnPose(command, index);
   }
+  const overrideKey = commandOverrideKey(command, index, simulation.commands);
+  const override = commandOverrideFromCommand(command);
+  if (overrideKey && override) commandOverrides.set(overrideKey, override);
   if (simulationAnimation?.frameId) cancelAnimationFrame(simulationAnimation.frameId);
   const timeline = buildSimulationTimeline(simulation.commands);
   const item = timelineItemForCommand(timeline, index);
@@ -1611,8 +1799,16 @@ function getDrawSegments() {
   return simulation?.segments?.filter((segment) => segment.kind === "draw") || [];
 }
 
+function getDeadSegments() {
+  return simulation?.segments || [];
+}
+
 function getSelectedDrawSegment() {
   return getDrawSegments().find((segment) => segment.id === selectedDeadSegmentId) || null;
+}
+
+function getSelectedDeadSegment() {
+  return getDeadSegments().find((segment) => segment.id === selectedDeadSegmentId) || null;
 }
 
 function selectDeadSegment(segmentId) {
@@ -1622,16 +1818,16 @@ function selectDeadSegment(segmentId) {
 }
 
 function selectFirstDeadDrawSegment() {
-  const [first] = getDrawSegments();
+  const [first] = getDeadSegments();
   selectedDeadSegmentId = first?.id || null;
 }
 
 function selectAdjacentDrawSegment(delta) {
-  const drawSegments = getDrawSegments();
-  if (!drawSegments.length) return;
-  const currentIndex = Math.max(0, drawSegments.findIndex((segment) => segment.id === selectedDeadSegmentId));
-  const nextIndex = clamp(currentIndex + delta, 0, drawSegments.length - 1);
-  selectDeadSegment(drawSegments[nextIndex].id);
+  const segments = getDeadSegments();
+  if (!segments.length) return;
+  const currentIndex = Math.max(0, segments.findIndex((segment) => segment.id === selectedDeadSegmentId));
+  const nextIndex = clamp(currentIndex + delta, 0, segments.length - 1);
+  selectDeadSegment(segments[nextIndex].id);
 }
 
 function findClickedDrawSegment(event) {
@@ -1644,7 +1840,7 @@ function findClickedDrawSegment(event) {
   };
   const threshold = 10 * dpr;
   let best = null;
-  for (const segment of getDrawSegments()) {
+  for (const segment of getDeadSegments()) {
     const start = matToCanvas(segment.start);
     const end = matToCanvas(segment.end);
     const d = distanceToCanvasSegment(point, start, end);
@@ -1672,7 +1868,7 @@ function updateDeadSegmentSetting(input) {
   if (!isDeadMode() || !simulation?.segments?.length) return;
   stopSimulationAnimation();
   simulation = createSimulation();
-  if (!getSelectedDrawSegment()) selectFirstDeadDrawSegment();
+  if (!getSelectedDeadSegment()) selectFirstDeadDrawSegment();
   const hasErrors = simulation.errors.length > 0;
   simulationValid = !hasErrors && simulation.commands.length > 0;
   syncRunButton();
@@ -2236,6 +2432,7 @@ function bindEvents() {
   els.simPauseBtn?.addEventListener("click", toggleSimulationPause);
   els.simPrevStepBtn?.addEventListener("click", () => stepSimulation(-1));
   els.simNextStepBtn?.addEventListener("click", () => stepSimulation(1));
+  els.copyCommandReportBtn?.addEventListener("click", () => copyCommandReport().catch((error) => log(`Copy failed: ${error.message}`)));
   els.toioCommandOutput?.addEventListener("input", (event) => {
     if (event.target instanceof HTMLInputElement) updateCommandEdit(event.target, { render: false });
   });
