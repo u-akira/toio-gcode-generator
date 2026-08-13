@@ -463,8 +463,8 @@ function drawSegmentHighlight(segment, selected) {
   const end = matToCanvas(segment.end);
   ctx.save();
   ctx.lineCap = "round";
-  ctx.strokeStyle = selected ? "#bd2f2f" : "rgba(37, 99, 235, 0.55)";
-  ctx.lineWidth = (selected ? 5 : 2.5) * dpr;
+  ctx.strokeStyle = selected ? "rgba(37, 99, 235, 0.85)" : "rgba(37, 99, 235, 0.45)";
+  ctx.lineWidth = 2.5 * dpr;
   ctx.beginPath();
   ctx.moveTo(start.x, start.y);
   ctx.lineTo(end.x, end.y);
@@ -498,19 +498,19 @@ function drawMat() {
   ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
 
   let label = "A3 simple play mat #01 (Position ID)";
+  const safe = safeBounds();
+  const s1 = matToCanvas({ x: safe.minX, y: safe.minY });
+  const s2 = matToCanvas({ x: safe.maxX, y: safe.maxY });
+  ctx.setLineDash([8, 7]);
+  ctx.strokeStyle = "#0f7b6c";
+  ctx.strokeRect(s1.x, s1.y, s2.x - s1.x, s2.y - s1.y);
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#6c6f73";
+  ctx.font = `${12 * (window.devicePixelRatio || 1)}px system-ui`;
+  ctx.fillText("safe drawing area", s1.x + 10, s1.y + 18);
+
   if (isDeadMode()) {
     label = "Dead reckoning preview (same drawing coordinates)";
-  } else {
-    const safe = safeBounds();
-    const s1 = matToCanvas({ x: safe.minX, y: safe.minY });
-    const s2 = matToCanvas({ x: safe.maxX, y: safe.maxY });
-    ctx.setLineDash([8, 7]);
-    ctx.strokeStyle = "#0f7b6c";
-    ctx.strokeRect(s1.x, s1.y, s2.x - s1.x, s2.y - s1.y);
-    ctx.setLineDash([]);
-    ctx.fillStyle = "#6c6f73";
-    ctx.font = `${12 * (window.devicePixelRatio || 1)}px system-ui`;
-    ctx.fillText("safe drawing area", s1.x + 10, s1.y + 18);
   }
 
   ctx.fillStyle = "#6c6f73";
