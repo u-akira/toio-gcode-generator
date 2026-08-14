@@ -46,7 +46,6 @@
         changed = true;
       }
       if (savedVersion < 8) {
-        saved.runMode = DEFAULT_CONFIG.runMode;
         saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
         saved.deadTurnBalanceTrim = DEFAULT_CONFIG.deadTurnBalanceTrim;
         saved.deadMmPerSecAtDrawSpeed = DEFAULT_CONFIG.deadMmPerSecAtDrawSpeed;
@@ -84,7 +83,12 @@
         saved.deadWheelBaseMm = DEFAULT_CONFIG.deadWheelBaseMm;
         changed = true;
       }
+      if (Object.prototype.hasOwnProperty.call(saved, "runMode")) {
+        delete saved.runMode;
+        changed = true;
+      }
       const loaded = { ...DEFAULT_CONFIG, ...saved, configVersion: DEFAULT_CONFIG.configVersion };
+      delete loaded.runMode;
       if (changed || saved.configVersion !== DEFAULT_CONFIG.configVersion) {
         localStorage.setItem(CONFIG_KEY, JSON.stringify(loaded));
       }
@@ -95,7 +99,9 @@
   }
 
   function saveConfig(config) {
-    localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+    const saved = { ...config };
+    delete saved.runMode;
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(saved));
   }
 
   function loadDeadSegmentSettings() {

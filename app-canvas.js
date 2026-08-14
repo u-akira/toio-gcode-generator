@@ -30,6 +30,17 @@
       return MAT;
     }
 
+    function syncCanvasBackingStore() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = root.devicePixelRatio || 1;
+      const width = Math.max(1, Math.round(rect.width * dpr));
+      const height = Math.max(1, Math.round(rect.height * dpr));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+    }
+
     function getView() {
       const width = canvas.width;
       const height = canvas.height;
@@ -59,6 +70,7 @@
     }
 
     function canvasToMat(clientX, clientY) {
+      syncCanvasBackingStore();
       const rect = canvas.getBoundingClientRect();
       const dpr = root.devicePixelRatio || 1;
       const x = (clientX - rect.left) * dpr;
@@ -72,6 +84,7 @@
     }
 
     function draw({ playMatImageLoaded = false } = {}) {
+      syncCanvasBackingStore();
       const simulation = getSimulation();
       canvas.style.cursor = isDeadMode() && getSimulationValid() && getDeadSegments().length ? "pointer" : "crosshair";
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -120,6 +133,7 @@
       ctx.lineJoin = "round";
       ctx.strokeStyle = selected ? "rgba(37, 99, 235, 0.85)" : "rgba(37, 99, 235, 0.45)";
       ctx.lineWidth = 2.5 * dpr;
+      if (segment.kind === "travel") ctx.setLineDash([8 * dpr, 7 * dpr]);
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
       for (let i = 1; i < points.length; i += 1) ctx.lineTo(points[i].x, points[i].y);

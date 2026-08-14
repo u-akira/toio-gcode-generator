@@ -111,10 +111,6 @@ const configInputs = [
   return map;
 }, {});
 
-const selectConfigInputs = {
-  runMode: els.runMode,
-};
-
 const ctx = els.canvas.getContext("2d");
 let resetTurnCalibrationLogOnLoad = true;
 let config = loadConfig();
@@ -122,14 +118,11 @@ let strokes = [];
 let activeStroke = null;
 let simulation = null;
 let simulationValid = false;
-let simulationAnimation = null;
-let activeSimulationCommandIndex = -1;
+let runMode = DEFAULT_CONFIG.runMode;
 let deadSegmentSettings = loadDeadSegmentSettings();
 let commandOverrides = new Map();
 let turnCalibrationLog = loadTurnCalibrationLog({ resetOnLoad: resetTurnCalibrationLogOnLoad });
 let selectedDeadSegmentId = null;
-let running = false;
-let abortRun = false;
 let moveCube = null;
 let penCube = null;
 let playMatImageLoaded = false;
@@ -138,6 +131,7 @@ let lastMovePoseAt = 0;
 let lastMovePoseState = "missed";
 let lastMovePoseUiAt = 0;
 let movePoseUiTimer = null;
+let canvasResizeObserver = null;
 let legendVisible = localStorage.getItem("toioPlotterLegendVisible") !== "false";
 
 const playMatImage = new Image();
@@ -150,7 +144,6 @@ playMatImage.onerror = () => {
   log(`プレイマット画像を読み込めませんでした: ${PLAY_MAT_IMAGE_SRC}`);
   draw();
 };
-playMatImage.src = PLAY_MAT_IMAGE_SRC;
 
 const canvasRenderer = window.ToioPlotterCanvas.createCanvasRenderer({
   MAT,
@@ -163,7 +156,7 @@ const canvasRenderer = window.ToioPlotterCanvas.createCanvasRenderer({
   getActiveStroke: () => activeStroke,
   getSimulation: () => simulation,
   getSimulationValid: () => simulationValid,
-  getSimulationAnimation: () => simulationAnimation,
+  getSimulationAnimation: () => simulationPlayback.getAnimation(),
   getAnimatedCommands: () => getAnimatedCommands(),
   getDeadSegments: () => getDeadSegments(),
   getSelectedDeadSegmentId: () => selectedDeadSegmentId,
@@ -174,6 +167,88 @@ const canvasRenderer = window.ToioPlotterCanvas.createCanvasRenderer({
   nativeToMatPose,
   distance,
   degToRad,
+});
+
+const simulationTimelineTools = window.ToioPlotterTimeline.createSimulationTimelineTools({
+  getSimulation: () => simulation,
+  getConfig: () => config,
+  cubeToPen,
+  clamp,
+  distance,
+  normalizeDegrees,
+  signedAngleDelta: window.PlotterCore.signedAngleDelta,
+  pointOnCircle: window.PlotterCore.pointOnCircle,
+  minTurnDurationMs: MIN_TURN_DURATION_MS,
+});
+
+const simulationPlayback = window.ToioPlotterSimulationPlayer.createSimulationPlaybackController({
+  getSimulationValid: () => simulationValid,
+  getCommands: () => simulation?.commands || [],
+  timelineTools: simulationTimelineTools,
+  clamp,
+  now: () => performance.now(),
+  requestFrame: (callback) => requestAnimationFrame(callback),
+  cancelFrame: (frameId) => cancelAnimationFrame(frameId),
+  onControlsChanged: () => syncSimulationControls(),
+  onActiveCommandChanged: () => updateActiveCommandRow(),
+  onDraw: () => draw(),
+});
+
+const commandEditor = window.ToioPlotterCommandEditor.createCommandEditor({
+  outputEl: els.toioCommandOutput,
+  getSimulation: () => simulation,
+  getSimulationValid: () => simulationValid,
+  getConfig: () => config,
+  getCommandOverrides: () => commandOverrides,
+  isDeadMode,
+  formatDeadToioCommand,
+  formatPositionToioCommand,
+  escapeHtml,
+  commandDurationMs,
+  roundToMotorDurationMs,
+  clamp,
+  minTurnDurationMs: MIN_TURN_DURATION_MS,
+  turnWheelSpeeds,
+  turnMsPer90,
+  cubeToPen,
+  normalizeDegrees,
+  syncSimulationControls,
+  focusCommand: (index, options) => simulationPlayback.focusCommand(index, options),
+  getActiveCommandIndex: () => simulationPlayback.getActiveCommandIndex(),
+  draw,
+});
+
+const toioRunner = window.ToioPlotterRunner.createToioRunner({
+  MAT,
+  getConfig: () => config,
+  getSimulation: () => simulation,
+  getSimulationValid: () => simulationValid,
+  getMoveCube: () => moveCube,
+  getPenCube: () => penCube,
+  isDeadMode,
+  hasFreshMovePose,
+  getLastMovePoseAt: () => lastMovePoseAt,
+  matToNativePoint,
+  pointInBounds,
+  getPenCommandSpeed,
+  getPenCommandDuration,
+  motorStraightSpeed,
+  turnWheelSpeeds,
+  turnMsPer90,
+  roundToMotorDurationMs,
+  clamp,
+  minTurnDurationMs: MIN_TURN_DURATION_MS,
+  positionFreshMs: POSITION_FRESH_MS,
+  positionRunTimeoutMs: POSITION_RUN_TIMEOUT_MS,
+  positionRetryWaitMs: POSITION_RETRY_WAIT_MS,
+  positionRetryPollMs: POSITION_RETRY_POLL_MS,
+  positionTargetRetryCount: POSITION_TARGET_RETRY_COUNT,
+  setPill,
+  runStatusEl: els.runStatus,
+  runButtonEl: els.runBtn,
+  log,
+  syncRunButton,
+  renderToioCommandOutput,
 });
 
 function resetDeadSegmentSettings() {
@@ -188,9 +263,11 @@ function syncConfigToForm() {
   for (const [key, input] of Object.entries(configInputs)) {
     input.value = config[key];
   }
-  for (const [key, input] of Object.entries(selectConfigInputs)) {
-    input.value = config[key];
-  }
+  syncRunModeToForm();
+}
+
+function syncRunModeToForm() {
+  els.runMode.value = runMode;
 }
 
 function applyConfigFromForm({ invalidate = true } = {}) {
@@ -199,10 +276,6 @@ function applyConfigFromForm({ invalidate = true } = {}) {
     const value = Number(input.value);
     if (config[key] !== value) changed = true;
     config[key] = value;
-  }
-  for (const [key, input] of Object.entries(selectConfigInputs)) {
-    if (config[key] !== input.value) changed = true;
-    config[key] = input.value;
   }
   if (changed) {
     saveConfig(config);
@@ -218,6 +291,15 @@ function applyConfigFromForm({ invalidate = true } = {}) {
 function readConfigFromForm() {
   applyConfigFromForm({ invalidate: true });
   renderTurnCalibration();
+}
+
+function changeRunMode() {
+  runMode = els.runMode.value;
+  selectedDeadSegmentId = null;
+  simulation = null;
+  invalidateSimulation("実行モードを変更しました");
+  renderDeadSegmentsEditor();
+  draw();
 }
 
 function invalidateSimulation(reason) {
@@ -236,7 +318,7 @@ function updateSb3ExportButton() {
 }
 
 function syncRunButton() {
-  els.runBtn.disabled = running || !simulationValid || !hasRequiredToioConnection();
+  els.runBtn.disabled = toioRunner.isRunning() || !simulationValid || !hasRequiredToioConnection();
 }
 
 function hasRequiredToioConnection() {
@@ -279,8 +361,19 @@ function canvasToMat(clientX, clientY) {
   return canvasRenderer.canvasToMat(clientX, clientY);
 }
 
+function observeCanvasSize() {
+  if (!window.ResizeObserver || canvasResizeObserver) return;
+  canvasResizeObserver = new ResizeObserver(() => resizeCanvasBackingStore());
+  canvasResizeObserver.observe(els.canvas);
+}
+
+function settleCanvasBackingStore() {
+  resizeCanvasBackingStore();
+  requestAnimationFrame(() => resizeCanvasBackingStore());
+}
+
 function isDeadMode() {
-  return config.runMode === "dead";
+  return runMode === "dead";
 }
 
 function safeBounds() {
@@ -381,7 +474,6 @@ function buildImportedSimulation(reason) {
   if (!isDeadMode()) strokes = simulation.processedStrokes;
   const hasErrors = simulation.errors.length > 0;
   simulationValid = !hasErrors && simulation.commands.length > 0;
-  activeSimulationCommandIndex = -1;
   if (simulationValid && isDeadMode() && !getSelectedDeadSegment()) selectFirstDeadDrawSegment();
   syncRunButton();
   updateSb3ExportButton();
@@ -393,195 +485,44 @@ function buildImportedSimulation(reason) {
 }
 
 function captureCommandOverrides() {
-  if (!simulation?.commands?.length) return;
-  for (const [index, command] of simulation.commands.entries()) {
-    const key = commandOverrideKey(command, index, simulation.commands);
-    if (!key) continue;
-    const override = commandOverrideFromCommand(command);
-    if (override) commandOverrides.set(key, override);
-  }
+  commandEditor.captureCommandOverrides();
 }
 
 function applyCommandOverrides() {
-  if (!simulation?.commands?.length || !commandOverrides.size) return;
-  for (const [index, command] of simulation.commands.entries()) {
-    const key = commandOverrideKey(command, index, simulation.commands);
-    const override = key ? commandOverrides.get(key) : null;
-    if (!override) continue;
-    if (command.type === "motor") {
-      if (command.geometry === "arc") {
-        if (override.leftSpeed != null) command.leftSpeed = override.leftSpeed;
-        if (override.rightSpeed != null) command.rightSpeed = override.rightSpeed;
-        if (override.durationMs != null) command.durationMs = override.durationMs;
-        command.manualWheelSpeeds = true;
-      } else {
-        ensureMotorBaseline(command);
-        if (override.speed != null) command.speed = override.speed;
-        if (override.durationMs != null) command.durationMs = override.durationMs;
-        if (override.distanceScale != null) {
-          command.distanceScale = override.distanceScale;
-          command.durationMs = roundToMotorDurationMs(Math.max(10, command.baseMotion.durationMs * command.distanceScale));
-        } else if (override.durationMs != null) {
-          command.distanceScale = motorDistanceScale(command);
-        }
-        command.leftSpeed = command.speed;
-        command.rightSpeed = command.speed;
-        updateStraightMotorPose(command);
-      }
-    } else if (command.type === "turn") {
-      if (override.leftSpeed != null) command.leftSpeed = override.leftSpeed;
-      if (override.rightSpeed != null) command.rightSpeed = override.rightSpeed;
-      if (override.durationMs != null) command.durationMs = override.durationMs;
-      command.manualWheelSpeeds = true;
-      updateManualTurnPose(command, index);
-    }
-  }
+  commandEditor.applyCommandOverrides();
 }
 
 function commandOverrideFromCommand(command) {
-  if (command.type === "motor" && command.geometry === "arc" && command.manualWheelSpeeds) {
-    return {
-      leftSpeed: command.leftSpeed,
-      rightSpeed: command.rightSpeed,
-      durationMs: command.durationMs,
-    };
-  }
-  if (command.type === "motor" && command.baseMotion) {
-    return {
-      speed: command.speed,
-      durationMs: command.durationMs,
-      distanceScale: command.distanceScale,
-    };
-  }
-  if (command.type === "turn" && command.manualWheelSpeeds) {
-    return {
-      leftSpeed: command.leftSpeed,
-      rightSpeed: command.rightSpeed,
-      durationMs: command.durationMs,
-    };
-  }
-  return null;
+  return commandEditor.commandOverrideFromCommand(command);
 }
 
 function commandOverrideKey(command, index, commands) {
-  if (!command || (command.type !== "motor" && command.type !== "turn")) return null;
-  const role = command.role || "";
-  const segmentId = command.segmentId || "";
-  const kind = command.kind || "";
-  const occurrence = commands
-    .slice(0, index + 1)
-    .filter((item) => item.type === command.type && (item.role || "") === role && (item.segmentId || "") === segmentId && (item.kind || "") === kind)
-    .length;
-  return [command.type, kind, role, segmentId, occurrence].join("|");
+  return commandEditor.commandOverrideKey(command, index, commands);
 }
 
 function startSimulationAnimation() {
-  const timeline = buildSimulationTimeline(simulation.commands);
-  simulationAnimation = {
-    startedAt: performance.now(),
-    elapsedMs: 0,
-    durationMs: Math.max(600, timeline.durationMs),
-    timeline,
-    playing: true,
-    frameId: null,
-  };
-  const tick = () => {
-    if (!simulationAnimation) return;
-    const elapsed = getSimulationElapsedMs();
-    if (elapsed >= simulationAnimation.durationMs) {
-      activeSimulationCommandIndex = lastPlayableCommandIndex(simulationAnimation.timeline);
-      simulationAnimation = null;
-      syncSimulationControls();
-      updateActiveCommandRow();
-      draw();
-      return;
-    }
-    activeSimulationCommandIndex = activeCommandIndexAtElapsed(simulationAnimation.timeline, elapsed);
-    updateActiveCommandRow();
-    draw();
-    if (simulationAnimation?.playing) simulationAnimation.frameId = requestAnimationFrame(tick);
-  };
-  simulationAnimation.frameId = requestAnimationFrame(tick);
-  syncSimulationControls();
+  simulationPlayback.start();
 }
 
 function stopSimulationAnimation() {
-  if (simulationAnimation?.frameId) cancelAnimationFrame(simulationAnimation.frameId);
-  simulationAnimation = null;
-  activeSimulationCommandIndex = -1;
-  syncSimulationControls();
-  updateActiveCommandRow();
+  simulationPlayback.stop();
 }
 
 function getSimulationElapsedMs() {
-  if (!simulationAnimation) return Infinity;
-  return simulationAnimation.playing ? performance.now() - simulationAnimation.startedAt : simulationAnimation.elapsedMs;
+  return simulationPlayback.getElapsedMs();
 }
 
 function toggleSimulationPause() {
-  if (!simulationAnimation) return;
-  if (simulationAnimation.playing) {
-    simulationAnimation.elapsedMs = getSimulationElapsedMs();
-    simulationAnimation.playing = false;
-    if (simulationAnimation.frameId) cancelAnimationFrame(simulationAnimation.frameId);
-    simulationAnimation.frameId = null;
-  } else {
-    simulationAnimation.playing = true;
-    simulationAnimation.startedAt = performance.now() - simulationAnimation.elapsedMs;
-    const tick = () => {
-      if (!simulationAnimation) return;
-      const elapsed = getSimulationElapsedMs();
-      if (elapsed >= simulationAnimation.durationMs) {
-        activeSimulationCommandIndex = lastPlayableCommandIndex(simulationAnimation.timeline);
-        simulationAnimation = null;
-        syncSimulationControls();
-        updateActiveCommandRow();
-        draw();
-        return;
-      }
-      activeSimulationCommandIndex = activeCommandIndexAtElapsed(simulationAnimation.timeline, elapsed);
-      updateActiveCommandRow();
-      draw();
-      if (simulationAnimation?.playing) simulationAnimation.frameId = requestAnimationFrame(tick);
-    };
-    simulationAnimation.frameId = requestAnimationFrame(tick);
-  }
-  syncSimulationControls();
-  draw();
+  simulationPlayback.togglePause();
 }
 
 function stepSimulation(delta) {
-  if (!simulationValid || !simulation?.commands?.length) return;
-  if (!simulationAnimation) {
-    const timeline = buildSimulationTimeline(simulation.commands);
-    if (!timeline.items.length) return;
-    simulationAnimation = {
-      startedAt: performance.now(),
-      elapsedMs: 0,
-      durationMs: Math.max(600, timeline.durationMs),
-      timeline,
-      playing: false,
-      frameId: null,
-    };
-  }
-  if (simulationAnimation.frameId) cancelAnimationFrame(simulationAnimation.frameId);
-  const current = activeSimulationCommandIndex < 0 ? -1 : activeSimulationCommandIndex;
-  const currentItemIndex = simulationAnimation.timeline.items.findIndex((item) => item.commandIndex === current);
-  const nextItemIndex = clamp((currentItemIndex < 0 ? -1 : currentItemIndex) + delta, 0, simulationAnimation.timeline.items.length - 1);
-  const item = simulationAnimation.timeline.items[nextItemIndex];
-  if (!item) return;
-  simulationAnimation.elapsedMs = item.startMs + Math.min(1, Math.max(0, item.endMs - item.startMs) / 2);
-  simulationAnimation.startedAt = performance.now() - simulationAnimation.elapsedMs;
-  simulationAnimation.playing = false;
-  simulationAnimation.frameId = null;
-  activeSimulationCommandIndex = item.commandIndex;
-  syncSimulationControls();
-  updateActiveCommandRow();
-  draw();
+  simulationPlayback.step(delta);
 }
 
 function syncSimulationControls() {
   const enabled = Boolean(simulationValid && simulation?.commands?.length);
+  const simulationAnimation = simulationPlayback.getAnimation();
   if (els.simPauseBtn) {
     els.simPauseBtn.disabled = !enabled || !simulationAnimation;
     els.simPauseBtn.textContent = simulationAnimation?.playing ? "Pause" : "Play";
@@ -679,157 +620,27 @@ async function copyText(text) {
 }
 
 function getAnimatedCommands() {
-  if (!simulationAnimation) return simulation?.commands || [];
-  const elapsed = getSimulationElapsedMs();
-  return commandsAtElapsed(simulationAnimation.timeline, elapsed);
+  return simulationPlayback.getAnimatedCommands();
 }
 
 function buildSimulationTimeline(commands) {
-  const items = [];
-  let cursorMs = 0;
-  let lastPenPoint = null;
-  let lastTheta = null;
-  let lastCubePose = null;
-  for (let index = 0; index < commands.length; index += 1) {
-    const command = commands[index];
-    const durationMs = commandDurationMs(command, lastPenPoint);
-    const fromTheta =
-      command.type === "turn" && lastTheta == null && command.angle != null
-        ? command.theta - command.angle
-        : command.type === "motor" && command.geometry === "arc" && command.startTheta != null
-          ? command.startTheta
-          : lastTheta;
-    if (isPlayableMoveCommand(command)) {
-      items.push({ command, commandIndex: index, startMs: cursorMs, endMs: cursorMs + durationMs, from: lastPenPoint, fromTheta, fromCubePose: lastCubePose });
-      cursorMs += durationMs;
-    }
-    if (command.theta != null) lastTheta = command.theta;
-    if (command.x != null && command.y != null && command.theta != null) {
-      lastCubePose = { x: command.x, y: command.y, theta: command.theta };
-    }
-    if ((command.type === "move" || command.type === "motor") && command.penX != null) {
-      lastPenPoint = { x: command.penX, y: command.penY };
-    }
-    if (command.type === "pen" && command.penX != null) {
-      lastPenPoint = { x: command.penX, y: command.penY };
-    }
-  }
-  return { items, durationMs: cursorMs };
-}
-
-function isPlayableMoveCommand(command) {
-  return command.type === "move" || command.type === "rotate" || command.type === "motor" || command.type === "turn";
+  return simulationTimelineTools.buildSimulationTimeline(commands);
 }
 
 function commandDurationMs(command, lastPenPoint) {
-  if (command.type === "wait") return command.ms;
-  if (command.type === "turn") return Math.max(MIN_TURN_DURATION_MS, command.durationMs || 0);
-  if (command.type === "motor") return Math.max(80, command.durationMs || 0);
-  if ((command.type === "move" || command.type === "rotate") && command.durationMs) return Math.max(80, command.durationMs);
-  if (command.type === "move" && command.penX != null && lastPenPoint) {
-    return clamp(distance(lastPenPoint, { x: command.penX, y: command.penY }) * 12, 160, 1200);
-  }
-  if (command.type === "rotate") return 220;
-  return 80;
+  return simulationTimelineTools.commandDurationMs(command, lastPenPoint);
 }
 
 function activeCommandIndexAtElapsed(timeline, elapsedMs) {
-  if (!timeline.items.length) return -1;
-  const item = timeline.items.find((entry) => elapsedMs >= entry.startMs && elapsedMs < entry.endMs);
-  if (item) return item.commandIndex;
-  return elapsedMs >= timeline.durationMs ? lastPlayableCommandIndex(timeline) : timeline.items[0].commandIndex;
+  return simulationTimelineTools.activeCommandIndexAtElapsed(timeline, elapsedMs);
 }
 
 function lastPlayableCommandIndex(timeline) {
-  return timeline.items[timeline.items.length - 1]?.commandIndex ?? -1;
+  return simulationTimelineTools.lastPlayableCommandIndex(timeline);
 }
 
 function commandsAtElapsed(timeline, elapsedMs) {
-  if (!timeline.items.length) return simulation?.commands || [];
-  for (const item of timeline.items) {
-    if (elapsedMs >= item.endMs) {
-      continue;
-    }
-    const endIndex = elapsedMs < item.startMs ? item.commandIndex : item.commandIndex + 1;
-    const result = simulation.commands.slice(0, endIndex);
-    if (elapsedMs >= item.startMs) result[result.length - 1] = partialCommand(item, elapsedMs);
-    return result.filter(Boolean);
-  }
-  return simulation.commands;
-}
-
-function partialCommand(item, elapsedMs) {
-  const command = item.command;
-  if (command.type === "turn" && command.theta != null && item.fromTheta != null) {
-    const span = Math.max(1, item.endMs - item.startMs);
-    const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
-    const theta = item.fromTheta + window.PlotterCore.signedAngleDelta(item.fromTheta, command.theta) * t;
-    const penPoint = command.x != null && command.y != null ? cubeToPen({ x: command.x, y: command.y }, theta, config) : null;
-    return {
-      ...command,
-      theta,
-      penX: penPoint ? penPoint.x : command.penX,
-      penY: penPoint ? penPoint.y : command.penY,
-    };
-  }
-  if (command.type === "motor" && command.geometry === "arc" && command.center && command.radius != null && command.startAngle != null && command.sweepAngle != null) {
-    const span = Math.max(1, item.endMs - item.startMs);
-    const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
-    const angle = command.startAngle + command.sweepAngle * t;
-    const theta = normalizeDegrees((command.startTheta ?? command.theta ?? 0) + command.sweepAngle * t);
-    const cubePoint = window.PlotterCore.pointOnCircle(command.center, command.radius, angle);
-    const penPoint = cubeToPen(cubePoint, theta, config);
-    const previewEnd = (points) => {
-      if (!Array.isArray(points)) return points;
-      const count = Math.max(1, Math.floor((points.length - 1) * t));
-      return points.slice(0, count + 1);
-    };
-    return {
-      ...command,
-      x: cubePoint.x,
-      y: cubePoint.y,
-      theta,
-      penX: penPoint.x,
-      penY: penPoint.y,
-      cubePreviewPoints: previewEnd(command.cubePreviewPoints),
-      penPreviewPoints: previewEnd(command.penPreviewPoints),
-    };
-  }
-  if (command.type === "motor" && command.x != null && command.y != null && item.fromCubePose) {
-    const span = Math.max(1, item.endMs - item.startMs);
-    const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
-    const fromCube = {
-      x: command.fromX ?? item.fromCubePose.x,
-      y: command.fromY ?? item.fromCubePose.y,
-      theta: item.fromCubePose.theta,
-    };
-    const cubePoint = {
-      x: fromCube.x + (command.x - fromCube.x) * t,
-      y: fromCube.y + (command.y - fromCube.y) * t,
-    };
-    const theta = command.theta ?? fromCube.theta;
-    const penPoint = cubeToPen(cubePoint, theta, config);
-    return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y };
-  }
-  if (command.type === "motor" && command.x != null && command.y != null && command.fromX != null && command.fromY != null) {
-    const span = Math.max(1, item.endMs - item.startMs);
-    const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
-    const cubePoint = {
-      x: command.fromX + (command.x - command.fromX) * t,
-      y: command.fromY + (command.y - command.fromY) * t,
-    };
-    const theta = command.theta || 0;
-    const penPoint = cubeToPen(cubePoint, theta, config);
-    return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y };
-  }
-  if ((command.type !== "move" && command.type !== "motor") || command.penX == null || !item.from) return command;
-  const span = Math.max(1, item.endMs - item.startMs);
-  const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
-  return {
-    ...command,
-    penX: item.from.x + (command.penX - item.from.x) * t,
-    penY: item.from.y + (command.penY - item.from.y) * t,
-  };
+  return simulationTimelineTools.commandsAtElapsed(timeline, elapsedMs);
 }
 
 function renderDeadSegmentsEditor() {
@@ -869,275 +680,78 @@ function renderDeadSegmentsEditor() {
 }
 
 function renderToioCommandOutput() {
-  if (!els.toioCommandOutput) return;
-  if (!simulationValid || !simulation) {
-    els.toioCommandOutput.textContent = "Simulate after drawing to show commands.";
-    syncSimulationControls();
-    return;
-  }
-  els.toioCommandOutput.innerHTML = simulation.commands.map((command, index) => commandRowTemplate(command, index)).filter(Boolean).join("");
-  syncSimulationControls();
-  updateActiveCommandRow();
+  commandEditor.renderToioCommandOutput();
 }
 
 function commandRowTemplate(command, index) {
-  const label = isDeadMode() ? formatDeadToioCommand(command) : formatPositionToioCommand(command);
-  if (!label) return "";
-  return `
-    <div class="command-row" data-command-index="${index}">
-      <button class="command-step-button" type="button" data-command-step="${index}">${String(index + 1).padStart(2, "0")}</button>
-      <div class="command-main">
-        <div class="command-label">${escapeHtml(label)}</div>
-        ${commandControlsTemplate(command, index)}
-      </div>
-    </div>
-  `;
+  return commandEditor.commandRowTemplate(command, index);
 }
 
 function commandControlsTemplate(command, index) {
-  if (command.type === "pen") {
-    return "";
-  }
-  if (command.type === "move" || command.type === "rotate") {
-    return `
-      <div class="command-fields">
-        ${commandInputTemplate(index, "speed", "speed", command.speed, 1, 10, 255)}
-        ${commandInputTemplate(index, "durationMs", "sim ms", displayCommandDurationMs(index), 10, 80, 10000)}
-      </div>
-    `;
-  }
-  if (command.type === "motor") {
-    if (command.geometry === "arc") {
-      return `
-      <div class="command-fields">
-        ${commandInputTemplate(index, "leftSpeed", "L", command.leftSpeed, 1, -255, 255)}
-        ${commandInputTemplate(index, "rightSpeed", "R", command.rightSpeed, 1, -255, 255)}
-        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || 10, 10, 10, 60000)}
-      </div>
-    `;
-    }
-    const distanceInput =
-      command.kind === "travel" ? commandInputTemplate(index, "distanceScale", "distance", motorDistanceScale(command), 0.05, 0.1, 2) : "";
-    return `
-      <div class="command-fields">
-        ${commandInputTemplate(index, "speed", "speed", motorStraightSpeed(command), 1, -255, 255)}
-        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || 10, 10, 10, 2550)}
-        ${distanceInput}
-      </div>
-    `;
-  }
-  if (command.type === "turn") {
-    const speeds = turnWheelSpeeds(command);
-    return `
-      <div class="command-fields">
-        ${commandInputTemplate(index, "leftSpeed", "L", speeds.left, 1, -255, 255)}
-        ${commandInputTemplate(index, "rightSpeed", "R", speeds.right, 1, -255, 255)}
-        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || 0, 10, 0, 2550)}
-      </div>
-    `;
-  }
-  if (command.type === "wait") {
-    return `<div class="command-fields">${commandInputTemplate(index, "ms", "ms", command.ms, 10, 0, 10000)}</div>`;
-  }
-  return "";
+  return commandEditor.commandControlsTemplate(command, index);
 }
 
 function motorStraightSpeed(command) {
-  if (command.speed != null) return command.speed;
-  return Math.round(((command.leftSpeed || 0) + (command.rightSpeed || 0)) / 2);
+  return commandEditor.motorStraightSpeed(command);
 }
 
 function motorDistanceScale(command) {
-  if (command.distanceScale != null) return command.distanceScale;
-  if (command.baseMotion?.durationMs) return (command.durationMs || 0) / Math.max(1, command.baseMotion.durationMs);
-  return 1;
+  return commandEditor.motorDistanceScale(command);
 }
 
 function displayCommandDurationMs(index) {
-  const command = simulation?.commands?.[index];
-  if (!command) return 0;
-  if (command.durationMs != null) return command.durationMs;
-  let lastPenPoint = null;
-  for (let i = 0; i < index; i += 1) {
-    const previous = simulation.commands[i];
-    if ((previous.type === "move" || previous.type === "motor") && previous.penX != null) {
-      lastPenPoint = { x: previous.penX, y: previous.penY };
-    }
-    if (previous.type === "pen" && previous.penX != null) {
-      lastPenPoint = { x: previous.penX, y: previous.penY };
-    }
-  }
-  return commandDurationMs(command, lastPenPoint);
+  return commandEditor.displayCommandDurationMs(index);
 }
 
 function commandInputTemplate(index, key, label, value, step, min, max) {
-  const rounded = Number(value || 0).toFixed(step < 1 ? 2 : 0);
-  return `<label>${label}<input data-command-index="${index}" data-command-key="${key}" type="number" min="${min}" max="${max}" step="${step}" value="${rounded}" /></label>`;
+  return commandEditor.commandInputTemplate(index, key, label, value, step, min, max);
 }
 
 function getPenCommandSpeed(command) {
-  if (command.speed != null) return command.speed;
-  return command.state === "up" ? config.upMotorSpeed : config.downMotorSpeed;
+  return commandEditor.getPenCommandSpeed(command);
 }
 
 function getPenCommandDuration(command) {
-  if (command.durationMs != null) return command.durationMs;
-  return command.state === "up" ? config.upDurationMs : config.downDurationMs;
+  return commandEditor.getPenCommandDuration(command);
 }
 
 function updateActiveCommandRow() {
-  if (!els.toioCommandOutput?.querySelectorAll) return;
-  for (const row of els.toioCommandOutput.querySelectorAll(".command-row")) {
-    row.classList.toggle("active", Number(row.dataset.commandIndex) === activeSimulationCommandIndex);
-  }
+  commandEditor.updateActiveCommandRow();
 }
 
 function updateCommandEdit(input, { render = true } = {}) {
-  if (!simulation?.commands) return;
-  const index = Number(input.dataset.commandIndex);
-  const key = input.dataset.commandKey;
-  const command = simulation.commands[index];
-  if (!command || !key) return;
-  if (input.value === "" || input.value === "-") return;
-  if (command.type === "motor" && command.geometry !== "arc" && (key === "speed" || key === "durationMs" || key === "distanceScale")) {
-    ensureMotorBaseline(command);
-  }
-  if (command.type === "turn" && (key === "leftSpeed" || key === "rightSpeed" || key === "durationMs") && !command.manualWheelSpeeds) {
-    const speeds = turnWheelSpeeds(command);
-    command.leftSpeed = speeds.left;
-    command.rightSpeed = speeds.right;
-  }
-  let value = Number(input.value);
-  if ((command.type === "turn" || command.type === "motor") && key === "durationMs") {
-    const minMs = command.type === "turn" ? MIN_TURN_DURATION_MS : 10;
-    value = command.type === "motor" && command.geometry === "arc" ? Math.round(Math.max(minMs, value) / 10) * 10 : roundToMotorDurationMs(Math.max(minMs, value));
-  }
-  if (command.type === "motor" && key === "distanceScale") {
-    value = clamp(value, 0.1, 2);
-    command.durationMs = roundToMotorDurationMs(Math.max(10, command.baseMotion.durationMs * value));
-  }
-  command[key] = value;
-  if (command.type === "motor" && command.geometry === "arc") {
-    if (key === "leftSpeed" || key === "rightSpeed") command[key] = clamp(value, -255, 255);
-    if (key === "leftSpeed" || key === "rightSpeed" || key === "durationMs") command.manualWheelSpeeds = true;
-  } else if (command.type === "motor" && (key === "speed" || key === "durationMs" || key === "distanceScale")) {
-    if (key !== "distanceScale") command.distanceScale = motorDistanceScale(command);
-    command.leftSpeed = command.speed;
-    command.rightSpeed = command.speed;
-    updateStraightMotorPose(command);
-  }
-  if (command.type === "turn" && (key === "leftSpeed" || key === "rightSpeed" || key === "durationMs")) {
-    command.manualWheelSpeeds = true;
-    updateManualTurnPose(command, index);
-  }
-  const overrideKey = commandOverrideKey(command, index, simulation.commands);
-  const override = commandOverrideFromCommand(command);
-  if (overrideKey && override) commandOverrides.set(overrideKey, override);
-  if (simulationAnimation?.frameId) cancelAnimationFrame(simulationAnimation.frameId);
-  const timeline = buildSimulationTimeline(simulation.commands);
-  const item = timelineItemForCommand(timeline, index);
-  simulationAnimation = {
-    startedAt: performance.now(),
-    elapsedMs: item?.startMs || 0,
-    durationMs: Math.max(600, timeline.durationMs),
-    timeline,
-    playing: false,
-    frameId: null,
-  };
-  activeSimulationCommandIndex = index;
-  if (render) {
-    renderToioCommandOutput();
-  } else {
-    syncSimulationControls();
-    updateActiveCommandRow();
-  }
-  draw();
+  commandEditor.updateCommandEdit(input, { render });
 }
 
 function ensureMotorBaseline(command) {
-  if (command.baseMotion) return;
-  command.speed = motorStraightSpeed(command);
-  command.baseMotion = {
-    speed: command.speed || 1,
-    durationMs: command.durationMs || 1,
-    fromX: command.fromX,
-    fromY: command.fromY,
-    x: command.x,
-    y: command.y,
-    theta: command.theta,
-  };
+  commandEditor.ensureMotorBaseline(command);
 }
 
 function updateStraightMotorPose(command) {
-  const base = command.baseMotion;
-  if (!base || base.fromX == null || base.fromY == null || base.x == null || base.y == null) return;
-  const speedScale = (command.speed || 0) / (Math.abs(base.speed || 1) < 1 ? 1 : base.speed);
-  const durationScale = (command.durationMs || 0) / Math.max(1, base.durationMs || 1);
-  const scale = speedScale * durationScale;
-  command.leftSpeed = command.speed;
-  command.rightSpeed = command.speed;
-  command.fromX = base.fromX;
-  command.fromY = base.fromY;
-  command.x = base.fromX + (base.x - base.fromX) * scale;
-  command.y = base.fromY + (base.y - base.fromY) * scale;
-  command.theta = base.theta;
-  const penPoint = cubeToPen({ x: command.x, y: command.y }, command.theta || 0, config);
-  command.penX = penPoint.x;
-  command.penY = penPoint.y;
+  commandEditor.updateStraightMotorPose(command);
 }
 
 function updateManualTurnPose(command, index) {
-  const fromTheta = turnStartThetaAtCommand(index, command);
-  const angle = manualTurnAngle(command);
-  command.angle = angle;
-  command.theta = normalizeDegrees(fromTheta + angle);
-  const penPoint = command.x != null && command.y != null ? cubeToPen({ x: command.x, y: command.y }, command.theta, config) : null;
-  if (penPoint) {
-    command.penX = penPoint.x;
-    command.penY = penPoint.y;
-  }
+  commandEditor.updateManualTurnPose(command, index);
 }
 
 function turnStartThetaAtCommand(index, command) {
-  let lastTheta = null;
-  for (let i = 0; i < index; i += 1) {
-    const previous = simulation.commands[i];
-    if (previous.theta != null) lastTheta = previous.theta;
-  }
-  if (lastTheta != null) return lastTheta;
-  return command.theta - (command.angle || 0);
+  return commandEditor.turnStartThetaAtCommand(index, command);
 }
 
 function manualTurnAngle(command) {
-  const speeds = turnWheelSpeeds(command);
-  const direction = speeds.left - speeds.right >= 0 ? 1 : -1;
-  const speedRatio = Math.abs((speeds.left - speeds.right) / 2) / Math.max(1, Math.abs(config.deadTurnSpeed));
-  const angularSpeedDegPerSec = (90 / (turnMsPer90() / 1000)) * speedRatio * direction;
-  return angularSpeedDegPerSec * ((command.durationMs || 0) / 1000);
+  return commandEditor.manualTurnAngle(command);
 }
 
 function jumpToCommand(index) {
-  if (!simulationValid || !simulation?.commands?.length) return;
-  if (simulationAnimation?.frameId) cancelAnimationFrame(simulationAnimation.frameId);
-  const timeline = buildSimulationTimeline(simulation.commands);
-  const item = timelineItemForCommand(timeline, index);
-  if (!item) return;
-  simulationAnimation = {
-    startedAt: performance.now(),
-    elapsedMs: item.startMs,
-    durationMs: Math.max(600, timeline.durationMs),
-    timeline,
-    playing: false,
-    frameId: null,
-  };
-  activeSimulationCommandIndex = index;
+  if (!simulationPlayback.focusCommand(index)) return;
   syncSimulationControls();
   updateActiveCommandRow();
   draw();
 }
 
 function timelineItemForCommand(timeline, commandIndex) {
-  return timeline.items.find((item) => item.commandIndex === commandIndex) || null;
+  return simulationTimelineTools.timelineItemForCommand(timeline, commandIndex);
 }
 
 function formatDeadToioCommands(commands) {
@@ -1354,137 +968,43 @@ function updateDeadSegmentSetting(input) {
 }
 
 async function runToio() {
-  if (!simulationValid || !simulation) {
-    log("先にシミュレーションを成功させてください。");
-    return;
-  }
-  if (isDeadMode()) {
-    await runDeadReckoningToio();
-    return;
-  }
-  if (!moveCube || !penCube) {
-    log("移動用と昇降用の toio を接続してください。");
-    return;
-  }
-  if (!hasFreshMovePose(POSITION_FRESH_MS)) {
-    log("移動用 toio の Position ID が未取得です。プレイマット上に置き、赤い実機toio表示が出てから実行してください。");
-    setPill(els.runStatus, "Position ID 未取得", "error");
-    return;
-  }
-  running = true;
-  abortRun = false;
-  els.runBtn.disabled = true;
-  setPill(els.runStatus, "実行中", "warn");
-
-  try {
-    for (const command of simulation.commands) {
-      if (abortRun) throw new Error("Emergency stop");
-      if (command.type === "pen") {
-        if (command.state === "down") {
-          await ensureFreshPositionOrRetry("pen down 前");
-        }
-        await setPen(command.state, command);
-        await ensureFreshPositionAfterPen(command.state, Date.now());
-      } else if (command.type === "move" || command.type === "rotate") {
-        const nativePoint = matToNativePoint(command);
-        if (!pointInBounds(nativePoint, MAT)) {
-          throw new Error(`toio 目標座標がマット外です: x=${nativePoint.x.toFixed(1)} y=${nativePoint.y.toFixed(1)}`);
-        }
-        await runMoveCommandWithPositionRetry(command, nativePoint);
-      } else if (command.type === "wait") {
-        await sleep(command.ms);
-      }
-    }
-    setPill(els.runStatus, "完了", "ok");
-    log("実機実行が完了しました。");
-  } catch (error) {
-    setPill(els.runStatus, "停止", "error");
-    log(`実機実行を停止しました: ${error.message}`);
-    await emergencyStop();
-  } finally {
-    running = false;
-    syncRunButton();
-  }
+  await toioRunner.runToio();
 }
 
 async function setPen(state, command = null) {
-  if (!penCube) throw new Error("ペン昇降用 toio が未接続です。");
-  const speed = command ? getPenCommandSpeed(command) : state === "up" ? config.upMotorSpeed : config.downMotorSpeed;
-  const durationMs = command ? getPenCommandDuration(command) : state === "up" ? config.upDurationMs : config.downDurationMs;
-  if (state === "up") {
-    await penCube.timedMotor(speed, durationMs, config.penMotorMode);
-  } else {
-    await penCube.timedMotor(speed, durationMs, config.penMotorMode);
-  }
-  await sleep(config.settleMs);
+  await toioRunner.setPen(state, command);
 }
 
 async function runMoveCommandWithPositionRetry(command, nativePoint) {
-  for (let attempt = 0; attempt <= POSITION_TARGET_RETRY_COUNT; attempt += 1) {
-    if (attempt > 0) log(`Position ID retry: ${attempt}/${POSITION_TARGET_RETRY_COUNT}`);
-    log(
-      `toio ${command.type}: x=${nativePoint.x.toFixed(1)} y=${nativePoint.y.toFixed(1)} ` +
-        `θ=${command.theta.toFixed(0)} speed=${command.speed}`,
-    );
-    try {
-      await moveCube.moveTo(nativePoint.x, nativePoint.y, command.theta, command.speed, config.targetTimeout);
-      return;
-    } catch (error) {
-      if (attempt >= POSITION_TARGET_RETRY_COUNT || !isPositionRetryableError(error)) throw error;
-      log(`Position ID retry: ${error.message}`);
-      await recoverPositionForRetry();
-    }
-  }
+  await toioRunner.runMoveCommandWithPositionRetry(command, nativePoint);
 }
 
 async function ensureFreshPositionOrRetry(context) {
-  if (hasFreshMovePose(POSITION_RUN_TIMEOUT_MS)) return;
-  log(`Position ID retry: ${context}にPosition IDを見失いました。ペンを上げて停止します。`);
-  await recoverPositionForRetry();
+  await toioRunner.ensureFreshPositionOrRetry(context);
 }
 
 async function ensureFreshPositionAfterPen(state, sinceMs) {
-  const recovered = await waitForFreshMovePoseAfter(sinceMs, POSITION_RUN_TIMEOUT_MS);
-  if (recovered) return;
-  log(`Position ID retry: pen ${state} aftershock, waiting for stable Position ID.`);
-  await recoverPositionForRetry();
+  await toioRunner.ensureFreshPositionAfterPen(state, sinceMs);
 }
 
 async function recoverPositionForRetry() {
-  await setPen("up");
-  await moveCube?.stop();
-  log("Position ID retry: 再取得を待っています...");
-  const recovered = await waitForFreshMovePose(POSITION_RETRY_WAIT_MS);
-  if (!recovered) throw new Error("移動用 toio の Position ID を再取得できませんでした。");
-  log("Position ID retry: 再取得しました。");
+  await toioRunner.recoverPositionForRetry();
 }
 
 async function waitForFreshMovePose(timeoutMs) {
-  const start = Date.now();
-  while (Date.now() - start <= timeoutMs) {
-    if (hasFreshMovePose(POSITION_FRESH_MS)) return true;
-    await sleep(POSITION_RETRY_POLL_MS);
-  }
-  return false;
+  return toioRunner.waitForFreshMovePose(timeoutMs);
 }
 
 async function waitForFreshMovePoseAfter(sinceMs, timeoutMs) {
-  const start = Date.now();
-  while (Date.now() - start <= timeoutMs) {
-    if (lastMovePoseAt >= sinceMs && hasFreshMovePose(POSITION_FRESH_MS)) return true;
-    await sleep(POSITION_RETRY_POLL_MS);
-  }
-  return false;
+  return toioRunner.waitForFreshMovePoseAfter(sinceMs, timeoutMs);
 }
 
 function isPositionRetryableError(error) {
-  return String(error?.message || "").includes("0x02");
+  return toioRunner.isPositionRetryableError(error);
 }
 
 async function emergencyStop() {
-  abortRun = true;
-  await Promise.allSettled([moveCube?.stop(), penCube?.stop()]);
-  setPill(els.runStatus, "停止", "error");
+  await toioRunner.emergencyStop();
 }
 
 function exportDrawing() {
@@ -1566,7 +1086,9 @@ function importDrawingPayload(payload, reason) {
   saveDeadSegmentSettings(deadSegmentSettings);
   renderDeadSegmentsEditor();
   if (payload.config) {
-    config = { ...config, ...payload.config };
+    const importedConfig = { ...payload.config };
+    delete importedConfig.runMode;
+    config = { ...config, ...importedConfig };
     syncConfigToForm();
     saveConfig(config);
   }
@@ -1640,8 +1162,8 @@ function handleCubeDisconnected(role) {
   } else {
     setConnectionState(els.penCubeState, "disconnected", "切断");
   }
-  abortRun = true;
-  if (running) {
+  toioRunner.requestAbort();
+  if (toioRunner.isRunning()) {
     void emergencyStop().finally(() => setPill(els.runStatus, "toio切断", "error"));
   }
   syncRunButton();
@@ -1697,66 +1219,19 @@ function updateMovePoseUi({ force = false } = {}) {
 }
 
 async function runDeadReckoningToio() {
-  if (!moveCube || !penCube) {
-    log("移動用と昇降用の toio を接続してください。");
-    return;
-  }
-  log("Dead reckoning: ペン先を start 点に置き、toio 前方を最初の線分方向に合わせてから実行します。");
-
-  running = true;
-  abortRun = false;
-  els.runBtn.disabled = true;
-  setPill(els.runStatus, "Dead reckoning 実行中", "warn");
-
-  try {
-    for (const command of simulation.commands) {
-      if (abortRun) throw new Error("Emergency stop");
-      if (command.type === "pen") {
-        await setPen(command.state, command);
-      } else if (command.type === "turn") {
-        await runDeadTurn(command);
-      } else if (command.type === "motor") {
-        await runDeadMotor(command);
-      } else if (command.type === "wait") {
-        await sleep(command.ms);
-      }
-    }
-    setPill(els.runStatus, "完了", "ok");
-    log("Dead reckoning 実行が完了しました。");
-  } catch (error) {
-    setPill(els.runStatus, "停止", "error");
-    log(`Dead reckoning 実行を停止しました: ${error.message}`);
-    await emergencyStop();
-  } finally {
-    running = false;
-    syncRunButton();
-  }
+  await toioRunner.runDeadReckoningToio();
 }
 
 async function runDeadTurn(command) {
-  if (!command.durationMs) return;
-  const durationMs = deadTurnDurationMsForRun(command);
-  const speeds = turnWheelSpeeds(command);
-  const leftSpeed = speeds.left;
-  const rightSpeed = speeds.right;
-  log(`turn ${command.angle.toFixed(0)}°: L=${leftSpeed} R=${rightSpeed} ${durationMs}ms`);
-  if (durationMs !== command.durationMs && !command.manualWheelSpeeds) {
-    command.durationMs = durationMs;
-    renderToioCommandOutput();
-  }
-  await moveCube.timedMotorPair(leftSpeed, rightSpeed, durationMs);
-  await sleep(durationMs);
+  await toioRunner.runDeadTurn(command);
 }
 
 function deadTurnDurationMsForRun(command) {
-  const durationMs = Math.max(MIN_TURN_DURATION_MS, command.durationMs || 0);
-  if (command.manualWheelSpeeds) return durationMs;
-  return plannedTurnDurationMs(command.angle || 0);
+  return toioRunner.deadTurnDurationMsForRun(command);
 }
 
 function plannedTurnDurationMs(angleDeg) {
-  if (Math.abs(angleDeg) < 0.1) return 0;
-  return roundToMotorDurationMs(Math.max(MIN_TURN_DURATION_MS, (Math.abs(angleDeg) / 90) * turnMsPer90()));
+  return toioRunner.plannedTurnDurationMs(angleDeg);
 }
 
 function roundToMotorDurationMs(durationMs) {
@@ -1764,21 +1239,11 @@ function roundToMotorDurationMs(durationMs) {
 }
 
 async function runDeadMotor(command) {
-  const leftSpeed = clamp(command.leftSpeed ?? command.speed ?? motorStraightSpeed(command), -255, 255);
-  const rightSpeed = clamp(command.rightSpeed ?? command.speed ?? motorStraightSpeed(command), -255, 255);
-  log(`${command.kind}: L=${leftSpeed} R=${rightSpeed} ${command.durationMs}ms`);
-  await runTimedMotorPairForDuration(leftSpeed, rightSpeed, command.durationMs);
+  await toioRunner.runDeadMotor(command);
 }
 
 async function runTimedMotorPairForDuration(leftSpeed, rightSpeed, durationMs) {
-  let remaining = Math.max(0, durationMs || 0);
-  while (remaining > 0) {
-    if (abortRun) throw new Error("Emergency stop");
-    const chunkMs = Math.min(2550, remaining);
-    await moveCube.timedMotorPair(leftSpeed, rightSpeed, chunkMs);
-    await sleep(chunkMs);
-    remaining -= chunkMs;
-  }
+  await toioRunner.runTimedMotorPairForDuration(leftSpeed, rightSpeed, durationMs);
 }
 
 function refreshMovePoseStatus() {
@@ -1962,9 +1427,7 @@ function bindEvents() {
     input.addEventListener("input", readConfigFromForm);
     input.addEventListener("change", readConfigFromForm);
   }
-  for (const input of Object.values(selectConfigInputs)) {
-    input.addEventListener("change", readConfigFromForm);
-  }
+  els.runMode.addEventListener("change", changeRunMode);
 }
 
 function init() {
@@ -1976,7 +1439,9 @@ function init() {
   updateSb3ExportButton();
   bindEvents();
   window.setInterval(refreshMovePoseStatus, POSITION_UI_REFRESH_MS);
-  resizeCanvasBackingStore();
+  observeCanvasSize();
+  settleCanvasBackingStore();
+  playMatImage.src = PLAY_MAT_IMAGE_SRC;
   setPill(els.simStatus, "未シミュレーション", "warn");
   log("準備完了。フリーハンドで描画してください。");
 }
