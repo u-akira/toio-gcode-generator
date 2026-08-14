@@ -71,6 +71,13 @@ Node.js の標準テストランナーを使います。追加ライブラリは
 node --test
 ```
 
+UI の実行モード切り替えと生成コマンド差分は Playwright で確認できます。
+
+```bash
+npm install
+npm run test:e2e
+```
+
 主に次の中核処理をテストします。
 
 - `plotter-core.js`: キャリブレーション設定を変えたときに、toio 軌跡、線分数、pen up/down 回数、安全領域判定が変わること。
