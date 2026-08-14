@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const core = require("../plotter-core.js");
+const circleSample = require("../samples/json/circle.json");
 
 function makeStroke(points) {
   return { raw: points.map(([x, y]) => ({ x, y })) };
@@ -262,6 +263,29 @@ test("dead reckoning arc primitive creates one arc motor command", () => {
   assert.notEqual(drawMotors[0].leftSpeed, drawMotors[0].rightSpeed);
   assert.ok(drawMotors[0].durationMs > 2550);
   assert.ok(drawMotors[0].penPreviewPoints.length > 10);
+});
+
+test("circle sample dead reckoning duration is scaled to half", () => {
+  const baseSample = {
+    ...circleSample,
+    deadSegmentSettings: {},
+  };
+  const base = core.createDeadReckoningSimulation({
+    strokes: baseSample.strokes,
+    config: core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: 0, penOffsetY: 0 }),
+    segmentSettings: baseSample.deadSegmentSettings,
+  });
+  const scaled = core.createDeadReckoningSimulation({
+    strokes: circleSample.strokes,
+    config: core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: 0, penOffsetY: 0 }),
+    segmentSettings: circleSample.deadSegmentSettings,
+  });
+  const baseMotor = base.commands.find((command) => command.type === "motor" && command.geometry === "arc");
+  const scaledMotor = scaled.commands.find((command) => command.type === "motor" && command.geometry === "arc");
+
+  assert.ok(baseMotor);
+  assert.ok(scaledMotor);
+  assert.equal(scaledMotor.durationMs, baseMotor.durationMs / 2);
 });
 
 test("dead reckoning uses auto-corrected freehand arcs as one draw motor command", () => {

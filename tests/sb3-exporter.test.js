@@ -89,6 +89,98 @@ test("buildOperations converts dead reckoning commands into two-cube toio Do ste
   assert.deepEqual(operations[7], { kind: "wheels", cube: 1, leftSpeed: 8, rightSpeed: 10, duration: 1 });
 });
 
+test("buildOperations keeps arc motor commands explicit", () => {
+  const operations = exporter.buildOperations(
+    [{ type: "motor", geometry: "arc", leftSpeed: 20, rightSpeed: 35, durationMs: 1500 }],
+    { settleMs: 0 },
+    {
+      turnWheelSpeeds: () => ({ left: 0, right: 0 }),
+      getPenCommandSpeed: () => 0,
+      getPenCommandDuration: () => 0,
+    },
+  );
+
+  assert.deepEqual(operations[2], { kind: "arc", cube: 1, leftSpeed: 8, rightSpeed: 14, duration: 1.5 });
+});
+
+test("exportProject emits reported arc command as toio wheel block", async () => {
+  const templateBytes = makeTemplateBytes(makeTemplateProject());
+  const sb3Bytes = await exporter.exportProject({
+    templateBytes,
+    commands: [{ type: "motor", kind: "draw", geometry: "arc", leftSpeed: 24, rightSpeed: 16, durationMs: 7330, segmentId: "seg-0" }],
+    segments: [
+      {
+        id: "seg-0",
+        kind: "draw",
+        geometry: "arc",
+        center: { x: 250, y: 250 },
+        radius: 70,
+        startAngle: 0,
+        sweepAngle: 360,
+        start: { x: 320, y: 250 },
+        end: { x: 320, y: 250 },
+        heading: 90,
+        lengthMm: 439.8,
+      },
+    ],
+    mat: { minX: 98, minY: 142, maxX: 402, maxY: 358 },
+    config: { settleMs: 0 },
+    turnWheelSpeeds: () => ({ left: 0, right: 0 }),
+    getPenCommandSpeed: () => 0,
+    getPenCommandDuration: () => 0,
+  });
+  const entries = exporter.readZip(sb3Bytes);
+  const project = JSON.parse(new TextDecoder().decode(entries.find((entry) => entry.name === "project.json").data));
+  const block = project.targets[1].blocks.plotter_cmd_0002;
+
+  assert.equal(block.opcode, "toio1_moveWheelsFor");
+  assert.deepEqual(block.inputs.LEFT_SPEED, [1, [4, "9"]]);
+  assert.deepEqual(block.inputs.RIGHT_SPEED, [1, [4, "6"]]);
+  assert.deepEqual(block.inputs.DURATION, [1, [4, "7.33"]]);
+  assert.ok(Object.values(project.targets[1].blocks).filter((entry) => entry.opcode === "motion_movesteps").length > 10);
+  assert.ok(Object.values(project.targets[1].blocks).filter((entry) => entry.opcode === "motion_turnright" || entry.opcode === "motion_turnleft").length > 10);
+});
+
+test("exportProject draws arc sprite path from pen preview points", async () => {
+  const templateBytes = makeTemplateBytes(makeTemplateProject());
+  const sb3Bytes = await exporter.exportProject({
+    templateBytes,
+    commands: [{ type: "motor", kind: "draw", geometry: "arc", leftSpeed: 24, rightSpeed: 16, durationMs: 1000, segmentId: "seg-0" }],
+    segments: [
+      {
+        id: "seg-0",
+        kind: "draw",
+        geometry: "arc",
+        center: { x: 50, y: 0 },
+        radius: 5,
+        startAngle: 180,
+        sweepAngle: 180,
+        start: { x: 0, y: 0 },
+        end: { x: 100, y: 0 },
+        heading: 0,
+        lengthMm: 100,
+        penPreviewPoints: [
+          { x: 0, y: 0 },
+          { x: 0, y: 50 },
+          { x: 100, y: 50 },
+        ],
+      },
+    ],
+    mat: { minX: 0, minY: 0, maxX: 100, maxY: 50 },
+    config: { settleMs: 0 },
+    turnWheelSpeeds: () => ({ left: 0, right: 0 }),
+    getPenCommandSpeed: () => 0,
+    getPenCommandDuration: () => 0,
+  });
+  const entries = exporter.readZip(sb3Bytes);
+  const project = JSON.parse(new TextDecoder().decode(entries.find((entry) => entry.name === "project.json").data));
+  const repeatCounts = Object.values(project.targets[1].blocks)
+    .filter((entry) => entry.opcode === "control_repeat")
+    .map((entry) => Number(entry.inputs.TIMES[1][1]));
+
+  assert.ok(repeatCounts.some((count) => count >= 20));
+});
+
 test("exportProject keeps assets and injects a generated block chain", async () => {
   const templateBytes = makeTemplateBytes(makeTemplateProject());
   const sb3Bytes = await exporter.exportProject({

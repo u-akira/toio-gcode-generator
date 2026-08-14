@@ -12,6 +12,7 @@
   const MOVE_FOR_OPCODE_SUFFIX = "moveFor";
   const MOVE_OPCODE_SUFFIX = "moveWheelsFor";
   const STOP_OPCODE_SUFFIX = "stopWheels";
+  const MAX_SPRITE_ARC_STEP_DEGREES = 8;
   const MAX_SPRITE_MOVE_STEP = 10;
   const MAX_SPRITE_TURN_STEP = 10;
   const SCRATCH_STAGE = { minX: -240, maxX: 240, minY: -180, maxY: 180 };
@@ -61,7 +62,7 @@
         operations.push({ kind: "stop", cube: 1 });
       } else if (command.type === "motor") {
         operations.push({
-          kind: "wheels",
+          kind: command.geometry === "arc" ? "arc" : "wheels",
           cube: 1,
           leftSpeed: scaleSpeed(command.leftSpeed ?? command.speed ?? 0),
           rightSpeed: scaleSpeed(command.rightSpeed ?? command.speed ?? 0),
@@ -73,7 +74,7 @@
       }
     }
 
-    return operations.filter((operation) => operation.kind !== "wheels" || operation.duration > 0);
+    return operations.filter((operation) => !["wheels", "arc"].includes(operation.kind) || operation.duration > 0);
   }
 
   function scaleSpeed(value) {
@@ -172,16 +173,42 @@
     operations.push({ kind: "point", direction: currentDirection });
 
     for (const segment of drawableSegments) {
-      const nextDirection = scratchDirection(segment.heading);
-      const delta = signedAngleDelta(currentDirection, nextDirection);
-      operations.push(...repeatTurnOperations(delta));
-      currentDirection = normalizeScratchDirection(currentDirection + delta);
       operations.push(segment.kind === "draw" ? { kind: "penDown" } : { kind: "penUp" });
-      operations.push(...repeatMoveOperations(segment.lengthMm * mapper.scale));
+      const points = spritePointsForSegment(segment);
+      for (let index = 1; index < points.length; index += 1) {
+        const from = points[index - 1];
+        const to = points[index];
+        const lengthMm = distance(from, to);
+        if (lengthMm < 0.001) continue;
+        const nextDirection = scratchDirection(headingBetween(from, to));
+        const delta = signedAngleDelta(currentDirection, nextDirection);
+        operations.push(...repeatTurnOperations(delta));
+        currentDirection = normalizeScratchDirection(currentDirection + delta);
+        operations.push(...repeatMoveOperations(lengthMm * mapper.scale));
+      }
       if (segment.kind === "draw") operations.push({ kind: "penUp" });
     }
 
     return operations;
+  }
+
+  function spritePointsForSegment(segment) {
+    if (segment.geometry === "arc" && Array.isArray(segment.penPreviewPoints) && segment.penPreviewPoints.length >= 2) {
+      return segment.penPreviewPoints;
+    }
+    if (segment.geometry !== "arc" || !segment.center || !Number.isFinite(segment.radius) || !Number.isFinite(segment.startAngle) || !Number.isFinite(segment.sweepAngle)) {
+      return [segment.start, segment.end];
+    }
+    const steps = Math.max(1, Math.ceil(Math.abs(segment.sweepAngle) / MAX_SPRITE_ARC_STEP_DEGREES));
+    const points = [];
+    for (let index = 0; index <= steps; index += 1) {
+      const angle = degToRad(segment.startAngle + (segment.sweepAngle * index) / steps);
+      points.push({
+        x: segment.center.x + Math.cos(angle) * segment.radius,
+        y: segment.center.y + Math.sin(angle) * segment.radius,
+      });
+    }
+    return points;
   }
 
   function createScratchMapper(mat, segments) {
@@ -203,7 +230,7 @@
   }
 
   function boundsForSegments(segments) {
-    const points = segments.flatMap((segment) => [segment.start, segment.end]);
+    const points = segments.flatMap((segment) => spritePointsForSegment(segment));
     return {
       minX: Math.min(...points.map((point) => point.x)),
       maxX: Math.max(...points.map((point) => point.x)),
@@ -235,6 +262,22 @@
 
   function signedAngleDelta(fromDeg, toDeg) {
     return ((((toDeg - fromDeg) % 360) + 540) % 360) - 180;
+  }
+
+  function headingBetween(from, to) {
+    return radToDeg(Math.atan2(to.y - from.y, to.x - from.x));
+  }
+
+  function distance(from, to) {
+    return Math.hypot(to.x - from.x, to.y - from.y);
+  }
+
+  function degToRad(degrees) {
+    return ((Number(degrees) || 0) * Math.PI) / 180;
+  }
+
+  function radToDeg(radians) {
+    return (radians * 180) / Math.PI;
   }
 
   function injectProgram(project, prototypes, operations, spriteOperations) {
