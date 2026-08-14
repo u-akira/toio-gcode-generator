@@ -24,6 +24,7 @@
       nativeToMatPose,
       distance,
       degToRad,
+      primitivePreviewPoints,
     } = deps;
 
     function getDrawingBounds() {
@@ -90,7 +91,7 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       drawMat(playMatImageLoaded);
       for (const stroke of getStrokes()) {
-        if (shouldDrawSourceStroke(stroke)) drawStroke(stroke.processed || stroke.raw, COLORS.drawing, 2.2);
+        drawSourceStroke(stroke);
       }
       const activeStroke = getActiveStroke();
       if (activeStroke) drawStroke(activeStroke.raw, COLORS.drawing, 2.2);
@@ -111,8 +112,25 @@
       if (getLegendVisible()) drawLegend();
     }
 
-    function shouldDrawSourceStroke(stroke) {
-      return !(isDeadMode() && Array.isArray(stroke.primitives) && stroke.primitives.length);
+    function drawSourceStroke(stroke) {
+      if (stroke.source === "freehand" && Array.isArray(stroke.primitives) && stroke.primitives.length) {
+        drawStroke(stroke.raw, "rgba(32, 33, 36, 0.22)", 1.4);
+        drawStroke(primitivesPreviewPoints(stroke.primitives), COLORS.drawing, 2.2);
+        return;
+      }
+      if (isDeadMode() && Array.isArray(stroke.primitives) && stroke.primitives.length) return;
+      drawStroke(stroke.processed || stroke.raw, COLORS.drawing, 2.2);
+    }
+
+    function primitivesPreviewPoints(primitives) {
+      const result = [];
+      for (const primitive of primitives) {
+        const points = primitivePreviewPoints(primitive, getConfig());
+        if (!points.length) continue;
+        if (result.length && distance(result[result.length - 1], points[0]) < 0.1) points.shift();
+        result.push(...points);
+      }
+      return result;
     }
 
     function drawDeadSegmentSelectionOverlay() {
@@ -332,7 +350,7 @@
       const dpr = root.devicePixelRatio || 1;
       const activeStroke = getActiveStroke();
       const items = [];
-      if (getStrokes().some(shouldDrawSourceStroke) || activeStroke) {
+      if (getStrokes().some(hasDrawableSourceStroke) || activeStroke) {
         items.push(["描画線", COLORS.drawing, "solid"]);
       }
       items.push(
@@ -384,6 +402,10 @@
         ctx.fillText(label, x + 32 * dpr, itemY);
       });
       ctx.restore();
+    }
+
+    function hasDrawableSourceStroke(stroke) {
+      return Boolean(stroke?.raw?.length || stroke?.processed?.length || stroke?.primitives?.length);
     }
 
     function drawAnimationCursor(commands) {

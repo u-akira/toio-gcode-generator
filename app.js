@@ -167,6 +167,7 @@ const canvasRenderer = window.ToioPlotterCanvas.createCanvasRenderer({
   nativeToMatPose,
   distance,
   degToRad,
+  primitivePreviewPoints: window.PlotterCore.primitivePreviewPoints,
 });
 
 const simulationTimelineTools = window.ToioPlotterTimeline.createSimulationTimelineTools({
@@ -397,6 +398,10 @@ function toggleLegend() {
 
 function processStroke(raw) {
   return window.PlotterCore.processStroke(raw, config);
+}
+
+function processFreehandStroke(raw) {
+  return window.PlotterCore.processStrokeShape(raw, config);
 }
 
 function createSimulation() {
@@ -1116,7 +1121,7 @@ function pointerDown(event) {
     activeStroke = null;
     return;
   }
-  activeStroke = { raw: [canvasToMat(event.clientX, event.clientY)] };
+  activeStroke = { source: "freehand", raw: [canvasToMat(event.clientX, event.clientY)] };
   els.canvas.setPointerCapture(event.pointerId);
   draw();
 }
@@ -1134,7 +1139,9 @@ function pointerUp(event) {
   if (!activeStroke) return;
   event.preventDefault();
   if (activeStroke.raw.length > 1) {
-    activeStroke.processed = processStroke(activeStroke.raw);
+    const shaped = processFreehandStroke(activeStroke.raw);
+    activeStroke.processed = shaped.processed;
+    activeStroke.primitives = shaped.primitives;
     strokes.push(activeStroke);
     resetDeadSegmentSettings();
     simulation = null;

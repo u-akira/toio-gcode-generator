@@ -82,6 +82,60 @@ test("corner preservation keeps an L shape as two draw segments", () => {
   assert.equal(result.stats.drawSegments, 2);
 });
 
+test("freehand shape correction turns a near straight stroke into one line primitive", () => {
+  const shape = core.processStrokeShape(
+    [
+      { x: 170, y: 250 },
+      { x: 200, y: 251 },
+      { x: 230, y: 249 },
+      { x: 270, y: 250 },
+    ],
+    core.withDefaults({ smoothing: 0, minPointDistance: 1, lineCorrection: 1, lineTolerance: 4, minSegmentLength: 0 }),
+  );
+
+  assert.equal(shape.primitives.length, 1);
+  assert.equal(shape.primitives[0].kind, "line");
+  assert.equal(shape.processed.length, 2);
+});
+
+test("freehand shape correction preserves a clear right angle as two line primitives", () => {
+  const shape = core.processStrokeShape(
+    [
+      { x: 180, y: 220 },
+      { x: 220, y: 220 },
+      { x: 250, y: 220 },
+      { x: 250, y: 250 },
+      { x: 250, y: 290 },
+    ],
+    core.withDefaults({ smoothing: 0, minPointDistance: 1, lineCorrection: 1, lineTolerance: 4, minSegmentLength: 0 }),
+  );
+
+  assert.equal(shape.primitives.length, 2);
+  assert.deepEqual(
+    shape.primitives.map((primitive) => primitive.kind),
+    ["line", "line"],
+  );
+});
+
+test("freehand shape correction turns a curved stroke into one arc primitive", () => {
+  const points = [];
+  for (let angle = 180; angle >= 45; angle -= 15) {
+    points.push({
+      x: 250 + 70 * Math.cos((angle * Math.PI) / 180),
+      y: 250 + 70 * Math.sin((angle * Math.PI) / 180),
+    });
+  }
+  const shape = core.processStrokeShape(
+    points,
+    core.withDefaults({ smoothing: 0, minPointDistance: 1, lineCorrection: 1, lineTolerance: 4, minSegmentLength: 0, penOffsetX: -48, penOffsetY: 0 }),
+  );
+
+  assert.equal(shape.primitives.length, 1);
+  assert.equal(shape.primitives[0].kind, "arc");
+  assert.ok(Math.abs(shape.primitives[0].sweepAngle) >= 120);
+  assert.ok(shape.processed.length > 2);
+});
+
 test("safe area setting affects simulation errors", () => {
   const stroke = makeStroke([
     [112, 152],
@@ -208,6 +262,25 @@ test("dead reckoning arc primitive creates one arc motor command", () => {
   assert.notEqual(drawMotors[0].leftSpeed, drawMotors[0].rightSpeed);
   assert.ok(drawMotors[0].durationMs > 2550);
   assert.ok(drawMotors[0].penPreviewPoints.length > 10);
+});
+
+test("dead reckoning uses auto-corrected freehand arcs as one draw motor command", () => {
+  const raw = [];
+  for (let angle = 180; angle >= 45; angle -= 15) {
+    raw.push({
+      x: 250 + 70 * Math.cos((angle * Math.PI) / 180),
+      y: 250 + 70 * Math.sin((angle * Math.PI) / 180),
+    });
+  }
+  const result = new core.DeadReckoningPlanner(
+    core.withDefaults({ smoothing: 0, minPointDistance: 1, lineCorrection: 1, lineTolerance: 4, minSegmentLength: 0, penOffsetX: -48, penOffsetY: 0 }),
+  ).plan([{ source: "freehand", raw }]);
+  const drawMotors = result.commands.filter((command) => command.type === "motor" && command.kind === "draw");
+
+  assert.equal(result.segments.length, 1);
+  assert.equal(result.segments[0].geometry, "arc");
+  assert.equal(drawMotors.length, 1);
+  assert.equal(drawMotors[0].geometry, "arc");
 });
 
 test("dead reckoning motor commands include cube start and end centers", () => {

@@ -16,7 +16,7 @@
 
   const NATIVE_MAT = { ...MAT };
   const DEFAULT_CONFIG = {
-    configVersion: 26,
+    configVersion: 27,
     safeScale: 0.75,
     fixedHeading: 0,
     penOffsetX: -48,
@@ -49,6 +49,11 @@
   };
   const MIN_TURN_DURATION_MS = 150;
   const ARC_PREVIEW_STEP_DEG = 5;
+  const RIGHT_ANGLE_DEG = 90;
+  const RIGHT_ANGLE_TOLERANCE_DEG = 18;
+  const MIN_ARC_SWEEP_DEG = 15;
+  const MAX_ARC_SWEEP_DEG = 270;
+  const MIN_PEN_ARC_RADIUS_MM = 8;
 
   function withDefaults(config = {}) {
     return { ...DEFAULT_CONFIG, ...config, configVersion: DEFAULT_CONFIG.configVersion };
@@ -104,6 +109,18 @@
     return processed.length >= 2 ? processed : reduced;
   }
 
+  function processStrokeShape(raw, configInput = {}) {
+    const config = withDefaults(configInput);
+    const fallback = processStroke(raw, config);
+    if (!config.lineCorrection) return { processed: fallback, primitives: null };
+    const reduced = reducePoints(raw, config.minPointDistance);
+    if (reduced.length < 2) return { processed: fallback, primitives: null };
+    const smoothed = smoothPoints(reduced, config.smoothing);
+    const shaped = fitShapePrimitives(smoothed, config);
+    if (!shaped?.primitives?.length) return { processed: fallback, primitives: null };
+    return shaped;
+  }
+
   class BasePlotterPlanner {
     constructor(configInput = {}) {
       this.config = withDefaults(configInput);
@@ -111,11 +128,42 @@
 
     processStrokes(strokes) {
       return strokes.map((stroke) => ({
-        ...stroke,
-        raw: Array.isArray(stroke.raw) ? stroke.raw : [],
-        primitives: Array.isArray(stroke.primitives) ? stroke.primitives : null,
-        processed: processStroke(Array.isArray(stroke.raw) ? stroke.raw : [], this.config),
+        ...this.processStrokeRecord(stroke),
       }));
+    }
+
+    processStrokeRecord(stroke) {
+      const raw = Array.isArray(stroke.raw) ? stroke.raw : [];
+      if (stroke.source === "freehand") {
+        const shaped = processStrokeShape(raw, this.config);
+        return {
+          ...stroke,
+          raw,
+          primitives: shaped.primitives,
+          processed: shaped.processed,
+        };
+      }
+      return {
+        ...stroke,
+        raw,
+        primitives: Array.isArray(stroke.primitives) ? stroke.primitives : null,
+        processed: processStroke(raw, this.config),
+      };
+    }
+
+    primitivePreviewPoints(primitive) {
+      return primitivePreviewPoints(primitive, this.config);
+    }
+
+    primitivesPreviewPoints(primitives) {
+      const result = [];
+      for (const primitive of primitives || []) {
+        const points = this.primitivePreviewPoints(primitive);
+        if (!points.length) continue;
+        if (result.length && distance(result[result.length - 1], points[0]) < 0.1) points.shift();
+        result.push(...points);
+      }
+      return result;
     }
 
     uniqueMessages(messages, limit) {
@@ -662,6 +710,21 @@
     };
   }
 
+  function primitivePreviewPoints(primitive, configInput = {}) {
+    const config = withDefaults(configInput);
+    if (primitive?.kind === "line") {
+      const start = clonePoint(primitive.start);
+      const end = clonePoint(primitive.end);
+      return isFinitePoint(start) && isFinitePoint(end) ? [start, end] : [];
+    }
+    if (primitive?.kind === "arc") {
+      const arc = normalizeArcPrimitive(primitive);
+      if (!arc) return [];
+      return arcPreviewPoints(arc, config).penPreviewPoints;
+    }
+    return [];
+  }
+
   function cubeToPen(point, theta, configInput = {}) {
     const config = withDefaults(configInput);
     const offset = rotatePoint(
@@ -816,6 +879,193 @@
     return Math.hypot(a.x - b.x, a.y - b.y);
   }
 
+  function angleFrom(center, point) {
+    return normalizeDegrees(radToDeg(Math.atan2(point.y - center.y, point.x - center.x)));
+  }
+
+  function fitShapePrimitives(points, config) {
+    if (points.length < 2) return null;
+    const tolerance = Math.max(0, Number(config.lineTolerance) || 0);
+    const corner = findRightAngleCorner(points, config, tolerance);
+    if (corner) {
+      const first = points[0];
+      const last = points[points.length - 1];
+      return {
+        processed: [first, corner.point, last],
+        primitives: [
+          { kind: "line", start: clonePoint(first), end: clonePoint(corner.point) },
+          { kind: "line", start: clonePoint(corner.point), end: clonePoint(last) },
+        ],
+      };
+    }
+
+    const line = fitLinePrimitive(points);
+    const arc = fitArcPrimitive(points, config, tolerance);
+    if (arc && arc.avgError <= line.avgError * 0.7) {
+      return {
+        processed: primitivePreviewPoints(arc.primitive, config),
+        primitives: [arc.primitive],
+      };
+    }
+
+    return {
+      processed: [clonePoint(line.start), clonePoint(line.end)],
+      primitives: [{ kind: "line", start: clonePoint(line.start), end: clonePoint(line.end) }],
+    };
+  }
+
+  function findRightAngleCorner(points, config, tolerance) {
+    if (points.length < 3) return null;
+    const maxLineError = Math.max(1, tolerance * 2.5);
+    const minLength = Math.max(1, Number(config.minSegmentLength) || 0);
+    let best = null;
+    for (let i = 1; i < points.length - 1; i += 1) {
+      const angle = turnAngle(points[i - 1], points[i], points[i + 1]);
+      const closeness = Math.abs(angle - RIGHT_ANGLE_DEG);
+      if (closeness > RIGHT_ANGLE_TOLERANCE_DEG) continue;
+      if (distance(points[0], points[i]) < minLength || distance(points[i], points[points.length - 1]) < minLength) continue;
+      const left = fitLinePrimitive(points.slice(0, i + 1));
+      const right = fitLinePrimitive(points.slice(i));
+      if (left.maxError > maxLineError || right.maxError > maxLineError) continue;
+      if (!best || closeness < best.closeness) best = { index: i, point: clonePoint(points[i]), closeness };
+    }
+    return best;
+  }
+
+  function fitLinePrimitive(points) {
+    const start = clonePoint(points[0]);
+    const end = clonePoint(points[points.length - 1]);
+    let totalError = 0;
+    let maxError = 0;
+    for (const point of points) {
+      const error = perpendicularDistance(point, start, end);
+      totalError += error;
+      maxError = Math.max(maxError, error);
+    }
+    return {
+      start,
+      end,
+      avgError: totalError / Math.max(1, points.length),
+      maxError,
+    };
+  }
+
+  function fitArcPrimitive(points, config, tolerance) {
+    if (points.length < 3) return null;
+    const circle = fitCircle(points);
+    if (!circle || circle.radius < MIN_PEN_ARC_RADIUS_MM) return null;
+    const sweep = signedSweepAngle(points, circle.center);
+    if (Math.abs(sweep) < MIN_ARC_SWEEP_DEG || Math.abs(sweep) > MAX_ARC_SWEEP_DEG) return null;
+
+    let totalError = 0;
+    let maxError = 0;
+    for (const point of points) {
+      const error = Math.abs(distance(point, circle.center) - circle.radius);
+      totalError += error;
+      maxError = Math.max(maxError, error);
+    }
+    const avgError = totalError / Math.max(1, points.length);
+    if (avgError > tolerance || maxError > Math.max(1, tolerance * 2.5)) return null;
+
+    const primitive = penArcToCubeArc(circle, points, sweep, config);
+    if (!primitive) return null;
+    return { primitive, avgError, maxError };
+  }
+
+  function fitCircle(points) {
+    let sumX = 0;
+    let sumY = 0;
+    let sumXX = 0;
+    let sumXY = 0;
+    let sumYY = 0;
+    let sumXXX = 0;
+    let sumXXY = 0;
+    let sumXYY = 0;
+    let sumYYY = 0;
+    const n = points.length;
+    for (const point of points) {
+      const x = point.x;
+      const y = point.y;
+      const xx = x * x;
+      const yy = y * y;
+      sumX += x;
+      sumY += y;
+      sumXX += xx;
+      sumXY += x * y;
+      sumYY += yy;
+      sumXXX += xx * x;
+      sumXXY += xx * y;
+      sumXYY += x * yy;
+      sumYYY += yy * y;
+    }
+    const solution = solve3x3(
+      [
+        [sumXX, sumXY, sumX],
+        [sumXY, sumYY, sumY],
+        [sumX, sumY, n],
+      ],
+      [-(sumXXX + sumXYY), -(sumXXY + sumYYY), -(sumXX + sumYY)],
+    );
+    if (!solution) return null;
+    const [d, e, f] = solution;
+    const center = { x: -d / 2, y: -e / 2 };
+    const radiusSq = center.x * center.x + center.y * center.y - f;
+    if (!Number.isFinite(radiusSq) || radiusSq <= 0) return null;
+    return { center, radius: Math.sqrt(radiusSq) };
+  }
+
+  function solve3x3(matrix, values) {
+    const rows = matrix.map((row, index) => [...row, values[index]]);
+    for (let col = 0; col < 3; col += 1) {
+      let pivot = col;
+      for (let row = col + 1; row < 3; row += 1) {
+        if (Math.abs(rows[row][col]) > Math.abs(rows[pivot][col])) pivot = row;
+      }
+      if (Math.abs(rows[pivot][col]) < 1e-9) return null;
+      if (pivot !== col) [rows[pivot], rows[col]] = [rows[col], rows[pivot]];
+      const divisor = rows[col][col];
+      for (let c = col; c < 4; c += 1) rows[col][c] /= divisor;
+      for (let row = 0; row < 3; row += 1) {
+        if (row === col) continue;
+        const factor = rows[row][col];
+        for (let c = col; c < 4; c += 1) rows[row][c] -= factor * rows[col][c];
+      }
+    }
+    return [rows[0][3], rows[1][3], rows[2][3]];
+  }
+
+  function signedSweepAngle(points, center) {
+    let previous = angleFrom(center, points[0]);
+    let sweep = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      const current = angleFrom(center, points[i]);
+      const delta = signedAngleDelta(previous, current);
+      sweep += delta;
+      previous = current;
+    }
+    return sweep;
+  }
+
+  function penArcToCubeArc(circle, points, sweepAngle, config) {
+    const startPenAngle = angleFrom(circle.center, points[0]);
+    const offsetX = Number(config.penOffsetX || 0) + Number(config.rotationCenterOffsetX || 0);
+    const offsetY = Number(config.penOffsetY || 0) + Number(config.rotationCenterOffsetY || 0);
+    const radialSq = circle.radius * circle.radius - offsetX * offsetX;
+    if (radialSq <= 0) return null;
+    const radial = Math.sqrt(radialSq);
+    const isPositiveSweep = sweepAngle >= 0;
+    const radius = isPositiveSweep ? radial + offsetY : radial - offsetY;
+    if (!Number.isFinite(radius) || radius < 1) return null;
+    const angleOffset = isPositiveSweep ? radToDeg(Math.atan2(offsetX, radial)) : radToDeg(Math.atan2(-offsetX, radial));
+    return {
+      kind: "arc",
+      center: clonePoint(circle.center),
+      radius,
+      startAngle: normalizeDegrees(startPenAngle - angleOffset),
+      sweepAngle,
+    };
+  }
+
   function clonePoint(point) {
     return point ? { x: Number(point.x), y: Number(point.y) } : null;
   }
@@ -862,6 +1112,10 @@
     return (deg * Math.PI) / 180;
   }
 
+  function radToDeg(rad) {
+    return (rad * 180) / Math.PI;
+  }
+
   function normalizeDegrees(value) {
     return ((value % 360) + 360) % 360;
   }
@@ -880,6 +1134,8 @@
     PositionIdPlanner,
     DeadReckoningPlanner,
     processStroke,
+    processStrokeShape,
+    primitivePreviewPoints,
     computeTurnDurationMs,
     roundToMotorDurationMs,
     computeTurnWheelSpeeds,
