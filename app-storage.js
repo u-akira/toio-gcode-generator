@@ -83,6 +83,11 @@
         saved.deadWheelBaseMm = DEFAULT_CONFIG.deadWheelBaseMm;
         changed = true;
       }
+      if (savedVersion < 28 && saved.penOffsetX === 0 && saved.penOffsetY === 0) {
+        saved.penOffsetX = DEFAULT_CONFIG.penOffsetX;
+        saved.penOffsetY = DEFAULT_CONFIG.penOffsetY;
+        changed = true;
+      }
       if (Object.prototype.hasOwnProperty.call(saved, "runMode")) {
         delete saved.runMode;
         changed = true;

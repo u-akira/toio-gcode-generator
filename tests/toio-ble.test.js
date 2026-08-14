@@ -67,6 +67,25 @@ test("buildTargetMoveCommand can override movement type", () => {
   assert.equal(bytes[3], 0);
 });
 
+test("buildSoundEffectCommand creates a sound effect command", () => {
+  assert.deepEqual([...toio.buildSoundEffectCommand(9, 255)], [0x02, 9, 255]);
+});
+
+test("buildMidiNoteCommand creates a short melody command", () => {
+  assert.deepEqual(
+    [
+      ...toio.buildMidiNoteCommand(
+        [
+          { durationMs: 100, note: 60 },
+          { durationMs: 140, note: 67, volume: 200 },
+        ],
+        1,
+      ),
+    ],
+    [0x03, 0x01, 0x02, 10, 60, 255, 14, 67, 200],
+  );
+});
+
 test("parseIdNotification parses Position ID", () => {
   const data = new Uint8Array(13);
   const dv = new DataView(data.buffer);

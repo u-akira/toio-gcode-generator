@@ -11,6 +11,7 @@
     service: "10b20100-5b3b-4571-9508-cf3efcd7bbae",
     id: "10b20101-5b3b-4571-9508-cf3efcd7bbae",
     motor: "10b20102-5b3b-4571-9508-cf3efcd7bbae",
+    sound: "10b20104-5b3b-4571-9508-cf3efcd7bbae",
   };
 
   class ToioCube {
@@ -26,6 +27,7 @@
       this.server = null;
       this.idChar = null;
       this.motorChar = null;
+      this.soundChar = null;
       this.pose = null;
       this.nextTargetId = 1;
       this.pendingTargets = new Map();
@@ -50,6 +52,7 @@
         this.server = null;
         this.idChar = null;
         this.motorChar = null;
+        this.soundChar = null;
         this.pose = null;
         for (const pending of this.pendingTargets.values()) {
           pending.reject(new Error(`${this.role} toio disconnected`));
@@ -62,6 +65,7 @@
       const service = await this.server.getPrimaryService(UUIDS.service);
       this.idChar = await service.getCharacteristic(UUIDS.id);
       this.motorChar = await service.getCharacteristic(UUIDS.motor);
+      this.soundChar = await service.getCharacteristic(UUIDS.sound);
 
       await this.idChar.startNotifications();
       this.idChar.addEventListener("characteristicvaluechanged", (event) => this.handleId(event.target.value));
@@ -114,6 +118,18 @@
 
     async timedMotorPair(leftSpeed, rightSpeed, durationMs) {
       await this.write(buildTimedMotorPairCommand(leftSpeed, rightSpeed, durationMs));
+    }
+
+    async playSoundEffect(soundId, volume = 255) {
+      if (!this.isConnected()) throw new Error(`${this.role} toio disconnected`);
+      if (!this.soundChar) throw new Error(`${this.role} toio のサウンドが未接続です。`);
+      await this.soundChar.writeValueWithoutResponse(buildSoundEffectCommand(soundId, volume));
+    }
+
+    async playMidiNotes(notes, repeat = 1) {
+      if (!this.isConnected()) throw new Error(`${this.role} toio disconnected`);
+      if (!this.soundChar) throw new Error(`${this.role} toio のサウンドが未接続です。`);
+      await this.soundChar.writeValueWithoutResponse(buildMidiNoteCommand(notes, repeat));
     }
 
     async moveTo(x, y, theta, speed, timeoutSec) {
@@ -239,6 +255,26 @@
     return bytes;
   }
 
+  function buildSoundEffectCommand(soundId, volume = 255) {
+    return Uint8Array.from([0x02, clamp(Math.round(soundId), 0, 10), clamp(Math.round(volume), 0, 255)]);
+  }
+
+  function buildMidiNoteCommand(notes, repeat = 1) {
+    const operations = (notes || []).slice(0, 59);
+    if (!operations.length) throw new Error("MIDI note command requires at least one note.");
+    const bytes = new Uint8Array(3 + operations.length * 3);
+    bytes[0] = 0x03;
+    bytes[1] = clamp(Math.round(repeat), 0, 255);
+    bytes[2] = operations.length;
+    operations.forEach((note, index) => {
+      const offset = 3 + index * 3;
+      bytes[offset] = clamp(Math.round((note.durationMs ?? 100) / 10), 1, 255);
+      bytes[offset + 1] = clamp(Math.round(note.note ?? 128), 0, 128);
+      bytes[offset + 2] = clamp(Math.round(note.volume ?? 255), 0, 255);
+    });
+    return bytes;
+  }
+
   function writeU16(bytes, offset, value) {
     bytes[offset] = value & 0xff;
     bytes[offset + 1] = (value >> 8) & 0xff;
@@ -259,5 +295,7 @@
     buildTimedMotorCommand,
     buildTimedMotorPairCommand,
     buildTargetMoveCommand,
+    buildSoundEffectCommand,
+    buildMidiNoteCommand,
   };
 });

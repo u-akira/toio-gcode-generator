@@ -16,7 +16,7 @@
 
   const NATIVE_MAT = { ...MAT };
   const DEFAULT_CONFIG = {
-    configVersion: 27,
+    configVersion: 28,
     safeScale: 0.75,
     fixedHeading: 0,
     penOffsetX: -48,

@@ -90,8 +90,10 @@
       canvas.style.cursor = isDeadMode() && getSimulationValid() && getDeadSegments().length ? "pointer" : "crosshair";
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       drawMat(playMatImageLoaded);
-      for (const stroke of getStrokes()) {
-        drawSourceStroke(stroke);
+      if (!simulation) {
+        for (const stroke of getStrokes()) {
+          drawSourceStroke(stroke);
+        }
       }
       const activeStroke = getActiveStroke();
       if (activeStroke) drawStroke(activeStroke.raw, COLORS.drawing, 2.2);
@@ -149,8 +151,8 @@
       ctx.save();
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      ctx.strokeStyle = selected ? "rgba(37, 99, 235, 0.85)" : "rgba(37, 99, 235, 0.45)";
-      ctx.lineWidth = 2.5 * dpr;
+      ctx.strokeStyle = selected ? "rgba(124, 58, 237, 0.72)" : "rgba(124, 58, 237, 0.16)";
+      ctx.lineWidth = (selected ? 2.1 : 1.1) * dpr;
       if (segment.kind === "travel") ctx.setLineDash([8 * dpr, 7 * dpr]);
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
@@ -348,12 +350,7 @@
 
     function drawLegend() {
       const dpr = root.devicePixelRatio || 1;
-      const activeStroke = getActiveStroke();
-      const items = [];
-      if (getStrokes().some(hasDrawableSourceStroke) || activeStroke) {
-        items.push(["描画線", COLORS.drawing, "solid"]);
-      }
-      items.push(
+      const items = [
         ["pen down 描画", COLORS.penSimulation, "solid"],
         ["pen up 移動", COLORS.penTravel, "dash"],
         ["pen down/up", COLORS.penDownEvent, "event"],
@@ -361,7 +358,7 @@
         ["toio開始", COLORS.cubeStart, "box"],
         ["toio終了", COLORS.cubeEnd, "box"],
         ["実機toio", COLORS.liveCube, "box"],
-      );
+      ];
       const x = canvas.width - 196 * dpr;
       const y = 50 * dpr;
       const lineH = 20 * dpr;
@@ -402,10 +399,6 @@
         ctx.fillText(label, x + 32 * dpr, itemY);
       });
       ctx.restore();
-    }
-
-    function hasDrawableSourceStroke(stroke) {
-      return Boolean(stroke?.raw?.length || stroke?.processed?.length || stroke?.primitives?.length);
     }
 
     function drawAnimationCursor(commands) {

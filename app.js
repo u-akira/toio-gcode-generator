@@ -1083,7 +1083,7 @@ async function importDrawing(file) {
   importDrawingPayload(JSON.parse(text), "描画 JSON を読み込みました");
 }
 
-function importDrawingPayload(payload, reason) {
+function importDrawingPayload(payload, reason, options = { preservePenOffset: true }) {
   strokes = Array.isArray(payload.strokes) ? payload.strokes : [];
   deadSegmentSettings = payload.deadSegmentSettings && typeof payload.deadSegmentSettings === "object" ? payload.deadSegmentSettings : {};
   commandOverrides = loadCommandOverrides(payload.commandOverrides);
@@ -1093,6 +1093,12 @@ function importDrawingPayload(payload, reason) {
   if (payload.config) {
     const importedConfig = { ...payload.config };
     delete importedConfig.runMode;
+    if (options.preservePenOffset) {
+      delete importedConfig.penOffsetX;
+      delete importedConfig.penOffsetY;
+      delete importedConfig.rotationCenterOffsetX;
+      delete importedConfig.rotationCenterOffsetY;
+    }
     config = { ...config, ...importedConfig };
     syncConfigToForm();
     saveConfig(config);

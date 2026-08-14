@@ -50,6 +50,26 @@
       return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
+    async function playRunSound(kind) {
+      const moveCube = getMoveCube();
+      if (!moveCube?.playMidiNotes) return;
+      const notes =
+        kind === "start"
+          ? [
+              { durationMs: 100, note: 60 },
+              { durationMs: 140, note: 67 },
+            ]
+          : [
+              { durationMs: 100, note: 72 },
+              { durationMs: 160, note: 64 },
+            ];
+      try {
+        await moveCube.playMidiNotes(notes, 1);
+      } catch (error) {
+        log(`toio sound skipped: ${error.message}`);
+      }
+    }
+
     async function runToio() {
       const simulation = getSimulation();
       const config = getConfig();
@@ -78,6 +98,7 @@
       setPill(runStatusEl, "Running", "warn");
 
       try {
+        await playRunSound("start");
         for (const command of simulation.commands) {
           if (abortRun) throw new Error("Emergency stop");
           if (command.type === "pen") {
@@ -96,6 +117,7 @@
             await sleep(command.ms);
           }
         }
+        await playRunSound("end");
         setPill(runStatusEl, "Done", "ok");
         log("toio run completed.");
       } catch (error) {
@@ -202,6 +224,7 @@
       setPill(runStatusEl, "Dead reckoning running", "warn");
 
       try {
+        await playRunSound("start");
         for (const command of simulation.commands) {
           if (abortRun) throw new Error("Emergency stop");
           if (command.type === "pen") {
@@ -214,6 +237,7 @@
             await sleep(command.ms);
           }
         }
+        await playRunSound("end");
         setPill(runStatusEl, "Done", "ok");
         log("Dead reckoning run completed.");
       } catch (error) {
@@ -274,6 +298,7 @@
       isRunning,
       requestAbort,
       sleep,
+      playRunSound,
       runToio,
       setPen,
       runMoveCommandWithPositionRetry,
