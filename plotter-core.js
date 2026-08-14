@@ -132,6 +132,9 @@
       const errors = [];
       const warnings = [];
       const processedStrokes = this.processStrokes(strokes);
+      let currentCube = null;
+      let currentTheta = null;
+      let penState = "down";
       const stats = {
         rawPoints: 0,
         processedPoints: 0,
@@ -145,7 +148,10 @@
         stats.rawPoints += stroke.raw.length;
         stats.processedPoints += stroke.processed.length;
 
-        commands.push({ type: "pen", state: "up" });
+        if (penState !== "up") {
+          commands.push({ type: "pen", state: "up" });
+          penState = "up";
+        }
 
         for (let i = 0; i < stroke.processed.length - 1; i += 1) {
           const start = stroke.processed[i];
@@ -156,7 +162,10 @@
           const endCube = penToCube(end, theta, config);
 
           this.validateSegment({ start, end, startCube, endCube, bounds, errors });
-          this.addSegmentCommands({ commands, cubePath, stats, start, end, startCube, endCube, theta });
+          const result = this.addSegmentCommands({ commands, cubePath, stats, start, end, startCube, endCube, theta, currentCube, currentTheta, penState });
+          currentCube = result.currentCube;
+          currentTheta = result.currentTheta;
+          penState = result.penState;
         }
       }
 
@@ -180,18 +189,31 @@
       }
     }
 
-    addSegmentCommands({ commands, cubePath, stats, start, end, startCube, endCube, theta }) {
+    addSegmentCommands({ commands, cubePath, stats, start, end, startCube, endCube, theta, currentCube, currentTheta, penState }) {
       const config = this.config;
-        commands.push({ type: "rotate", x: startCube.x, y: startCube.y, theta, speed: config.travelSpeed, penX: start.x, penY: start.y });
-      commands.push({ type: "move", x: startCube.x, y: startCube.y, theta, speed: config.travelSpeed, penX: start.x, penY: start.y });
-      commands.push({ type: "pen", state: "down", penX: start.x, penY: start.y });
+      if (currentCube) {
+        const travelDistance = distance(currentCube, startCube);
+        const turnAngleValue = currentTheta == null ? 0 : Math.abs(signedAngleDelta(currentTheta, theta));
+        const type = travelDistance < 0.1 && turnAngleValue > 0.1 ? "rotate" : "move";
+        if (travelDistance >= 0.1 || turnAngleValue > 0.1) {
+          commands.push({ type, x: startCube.x, y: startCube.y, theta, speed: config.travelSpeed, penX: start.x, penY: start.y });
+        }
+      } else {
+        commands.push({ type: "move", x: startCube.x, y: startCube.y, theta, speed: config.travelSpeed, penX: start.x, penY: start.y });
+      }
+      if (penState !== "down") {
+        commands.push({ type: "pen", state: "down", penX: start.x, penY: start.y });
+        penState = "down";
+      }
       commands.push({ type: "move", x: endCube.x, y: endCube.y, theta, speed: config.drawSpeed, penX: end.x, penY: end.y });
       commands.push({ type: "pen", state: "up", penX: end.x, penY: end.y });
+      penState = "up";
 
       stats.penDowns += 1;
       stats.penUps += 1;
       stats.drawSegments += 1;
       cubePath.push({ ...startCube, theta }, { ...endCube, theta });
+      return { currentCube: endCube, currentTheta: theta, penState };
     }
   }
 

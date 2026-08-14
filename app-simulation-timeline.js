@@ -15,6 +15,9 @@
     } = deps;
 
     function buildSimulationTimeline(commands) {
+      const mode = simulationModeForCommands(commands);
+      const config = getConfig();
+      const initialTheta = Number(config.fixedHeading) || 0;
       const items = [];
       let cursorMs = 0;
       let lastPenPoint = null;
@@ -28,8 +31,10 @@
             ? command.theta - command.angle
             : command.type === "motor" && command.geometry === "arc" && command.startTheta != null
               ? command.startTheta
-              : lastTheta;
-        if (isPlayableMoveCommand(command)) {
+              : command.type === "rotate" && lastTheta == null
+                ? initialTheta
+                : lastTheta;
+        if (isPlayableCommand(command, mode)) {
           items.push({
             command,
             commandIndex: index,
@@ -45,18 +50,26 @@
         if (command.x != null && command.y != null && command.theta != null) {
           lastCubePose = { x: command.x, y: command.y, theta: command.theta };
         }
-        if ((command.type === "move" || command.type === "motor") && command.penX != null) {
+        if ((command.type === "move" || command.type === "rotate" || command.type === "motor") && command.penX != null) {
           lastPenPoint = { x: command.penX, y: command.penY };
         }
         if (command.type === "pen" && command.penX != null) {
           lastPenPoint = { x: command.penX, y: command.penY };
         }
       }
-      return { items, durationMs: cursorMs };
+      return { items, durationMs: cursorMs, mode };
     }
 
-    function isPlayableMoveCommand(command) {
-      return command.type === "move" || command.type === "rotate" || command.type === "motor" || command.type === "turn";
+    function simulationModeForCommands(commands) {
+      const simulationMode = getSimulation()?.mode;
+      if (simulationMode === "dead") return "dead";
+      if (simulationMode === "position") return "position";
+      return commands.some((command) => command.type === "motor" || command.type === "turn") ? "dead" : "position";
+    }
+
+    function isPlayableCommand(command, mode) {
+      if (mode === "dead") return command.type === "motor" || command.type === "turn";
+      return command.type === "move" || command.type === "rotate";
     }
 
     function commandDurationMs(command, lastPenPoint) {
@@ -91,13 +104,18 @@
         }
         const endIndex = elapsedMs < item.startMs ? item.commandIndex : item.commandIndex + 1;
         const result = simulation.commands.slice(0, endIndex);
-        if (elapsedMs >= item.startMs) result[result.length - 1] = partialCommand(item, elapsedMs);
+        if (elapsedMs >= item.startMs) result[result.length - 1] = partialCommand(item, elapsedMs, timeline.mode);
         return result.filter(Boolean);
       }
       return simulation.commands;
     }
 
-    function partialCommand(item, elapsedMs) {
+    function partialCommand(item, elapsedMs, mode) {
+      if (mode === "dead") return partialDeadCommand(item, elapsedMs);
+      return partialPositionCommand(item, elapsedMs);
+    }
+
+    function partialDeadCommand(item, elapsedMs) {
       const command = item.command;
       const config = getConfig();
       if (command.type === "turn" && command.theta != null && item.fromTheta != null) {
@@ -162,7 +180,29 @@
         const penPoint = cubeToPen(cubePoint, theta, config);
         return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y };
       }
-      if ((command.type !== "move" && command.type !== "motor") || command.penX == null || !item.from) return command;
+      return command;
+    }
+
+    function partialPositionCommand(item, elapsedMs) {
+      const command = item.command;
+      const config = getConfig();
+      if (command.type === "rotate" && command.x != null && command.y != null && command.theta != null && item.fromTheta != null) {
+        const span = Math.max(1, item.endMs - item.startMs);
+        const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
+        const cubePoint = item.fromCubePose
+          ? {
+              x: item.fromCubePose.x + (command.x - item.fromCubePose.x) * t,
+              y: item.fromCubePose.y + (command.y - item.fromCubePose.y) * t,
+            }
+          : { x: command.x, y: command.y };
+        const theta = item.fromTheta + signedAngleDelta(item.fromTheta, command.theta) * t;
+        const penPoint = cubeToPen(cubePoint, theta, config);
+        return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y };
+      }
+      if (command.type === "move" && command.x != null && command.y != null && command.theta != null && item.fromCubePose) {
+        return partialPositionMoveCommand(command, item, elapsedMs, config);
+      }
+      if (command.type !== "move" || command.penX == null || !item.from) return command;
       const span = Math.max(1, item.endMs - item.startMs);
       const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
       return {
@@ -170,6 +210,51 @@
         penX: item.from.x + (command.penX - item.from.x) * t,
         penY: item.from.y + (command.penY - item.from.y) * t,
       };
+    }
+
+    function partialPositionMoveCommand(command, item, elapsedMs, config) {
+      const span = Math.max(1, item.endMs - item.startMs);
+      const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
+      const from = item.fromCubePose;
+      const target = { x: command.x, y: command.y, theta: command.theta };
+      const dx = target.x - from.x;
+      const dy = target.y - from.y;
+      const travelDistance = Math.hypot(dx, dy);
+      if (travelDistance < 0.1) {
+        const theta = from.theta + signedAngleDelta(from.theta, target.theta) * t;
+        const penPoint = cubeToPen(target, theta, config);
+        return { ...command, x: target.x, y: target.y, theta, penX: penPoint.x, penY: penPoint.y };
+      }
+
+      const travelTheta = normalizeDegrees((Math.atan2(dy, dx) * 180) / Math.PI);
+      const firstTurnAngle = Math.abs(signedAngleDelta(from.theta, travelTheta));
+      const finalTurnAngle = Math.abs(signedAngleDelta(travelTheta, target.theta));
+      const firstTurnWeight = firstTurnAngle > 1 ? (firstTurnAngle / 90) * 35 : 0;
+      const finalTurnWeight = finalTurnAngle > 1 ? (finalTurnAngle / 90) * 35 : 0;
+      const totalWeight = Math.max(1, firstTurnWeight + travelDistance + finalTurnWeight);
+      const firstTurnEnd = firstTurnWeight / totalWeight;
+      const moveEnd = (firstTurnWeight + travelDistance) / totalWeight;
+
+      let cubePoint = { x: from.x, y: from.y };
+      let theta = from.theta;
+      if (t < firstTurnEnd && firstTurnEnd > 0) {
+        const localT = t / firstTurnEnd;
+        theta = from.theta + signedAngleDelta(from.theta, travelTheta) * localT;
+      } else if (t < moveEnd) {
+        const localT = (t - firstTurnEnd) / Math.max(0.001, moveEnd - firstTurnEnd);
+        cubePoint = {
+          x: from.x + dx * localT,
+          y: from.y + dy * localT,
+        };
+        theta = travelTheta;
+      } else {
+        const localT = (t - moveEnd) / Math.max(0.001, 1 - moveEnd);
+        cubePoint = { x: target.x, y: target.y };
+        theta = travelTheta + signedAngleDelta(travelTheta, target.theta) * localT;
+      }
+
+      const penPoint = cubeToPen(cubePoint, theta, config);
+      return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y };
     }
 
     function timelineItemForCommand(timeline, commandIndex) {

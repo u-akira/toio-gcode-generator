@@ -107,6 +107,42 @@ test("draw and travel speed settings are reflected in commands", () => {
   assert.ok(travelMove);
 });
 
+test("position id travel between parallel strokes is a move, not a rotate", () => {
+  const strokes = [
+    makeStroke([
+      [180, 225],
+      [320, 225],
+    ]),
+    makeStroke([
+      [180, 275],
+      [320, 275],
+    ]),
+  ];
+  const result = new core.PositionIdPlanner(
+    core.withDefaults({
+      smoothing: 0,
+      minPointDistance: 1,
+      cornerAngle: 60,
+      lineCorrection: 1,
+      lineTolerance: 4,
+      minSegmentLength: 0,
+      penOffsetX: -48,
+      penOffsetY: 0,
+      drawSpeed: 20,
+      travelSpeed: 20,
+    }),
+  ).plan(strokes);
+
+  assert.deepEqual(
+    result.commands.map((command) => command.type),
+    ["pen", "move", "pen", "move", "pen", "move", "pen", "move", "pen"],
+  );
+  assert.equal(result.commands.some((command) => command.type === "rotate"), false);
+  assert.equal(result.commands[5].x, 228);
+  assert.equal(result.commands[5].y, 275);
+  assert.equal(result.commands[5].theta, 0);
+});
+
 test("native Position ID center is used directly as the play mat coordinate system", () => {
   const nativeCenter = {
     x: (core.NATIVE_MAT.minX + core.NATIVE_MAT.maxX) / 2,

@@ -141,7 +141,8 @@
       const timeline = timelineTools.buildSimulationTimeline(commands);
       const item = timelineTools.timelineItemForCommand(timeline, index);
       if (!item && !options.allowMissing) return false;
-      animation = createAnimation(timeline, item?.startMs || 0, false);
+      const elapsedMs = item ? item.startMs + Math.min(1, Math.max(0, item.endMs - item.startMs) / 2) : 0;
+      animation = createAnimation(timeline, elapsedMs, false);
       activeCommandIndex = index;
       return true;
     }
