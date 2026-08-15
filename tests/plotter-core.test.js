@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const core = require("../plotter-core.js");
 const circleSample = require("../samples/json/circle.json");
+const catFaceSample = require("../samples/json/cat-face.json");
 
 function makeStroke(points) {
   return { raw: points.map(([x, y]) => ({ x, y })) };
@@ -286,6 +287,22 @@ test("circle sample dead reckoning duration is scaled to half", () => {
   assert.ok(baseMotor);
   assert.ok(scaledMotor);
   assert.equal(scaledMotor.durationMs, baseMotor.durationMs / 2);
+});
+
+test("cat face sample connects straight ears to the lower arc", () => {
+  const result = core.createDeadReckoningSimulation({
+    strokes: catFaceSample.strokes,
+    config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+  });
+  const arc = result.segments.find((segment) => segment.geometry === "arc");
+  const previous = result.segments[result.segments.indexOf(arc) - 1];
+
+  assert.equal(result.segments.length, 5);
+  assert.equal(result.segments.some((segment) => segment.kind === "travel"), false);
+  assert.ok(arc);
+  assert.ok(previous);
+  assert.ok(core.distance(previous.end, arc.start) < 0.1);
+  assert.ok(core.distance(arc.end, result.segments[0].start) < 0.1);
 });
 
 test("dead reckoning uses auto-corrected freehand arcs as one draw motor command", () => {
