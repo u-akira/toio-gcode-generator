@@ -322,10 +322,12 @@ test("keroppi outline sample draws tight outer eyes and side outline arcs slowly
   const drawMotors = result.commands.filter((command) => command.type === "motor" && command.kind === "draw");
   const drawSegments = result.segments.filter((segment) => segment.kind === "draw");
   const mouth = drawSegments[4];
+  const leftInnerEye = drawSegments[5];
+  const rightInnerEye = drawSegments[6];
   const leftEyeRadius = Math.hypot(8, 48);
 
   assert.deepEqual(result.errors, []);
-  assert.equal(result.stats.drawSegments, 5);
+  assert.equal(result.stats.drawSegments, 7);
   assert.ok(Math.abs(core.distance(drawSegments[0].start, { x: 201, y: 218 }) - leftEyeRadius) < 1);
   assert.ok(drawSegments[0].start.x < 170);
   assert.ok(Math.abs(drawSegments[0].start.x + drawSegments[3].start.x - 500) < 1);
@@ -333,6 +335,10 @@ test("keroppi outline sample draws tight outer eyes and side outline arcs slowly
   assert.ok(mouth.start.x < 210);
   assert.ok(mouth.end.x > 290);
   assert.ok(Math.max(...mouth.penPreviewPoints.map((point) => point.y)) > 345);
+  assert.ok(Math.abs(leftInnerEye.start.x + rightInnerEye.end.x - 500) < 1);
+  assert.ok(Math.abs(leftInnerEye.end.x + rightInnerEye.start.x - 500) < 1);
+  assert.ok(Math.min(...leftInnerEye.penPreviewPoints.map((point) => point.y)) < 220);
+  assert.ok(Math.min(...rightInnerEye.penPreviewPoints.map((point) => point.y)) < 220);
   assert.ok(drawMotors.some((command) => command.leftSpeed < 0 || command.rightSpeed < 0));
   assert.ok(drawMotors.every((command) => Math.max(Math.abs(command.leftSpeed), Math.abs(command.rightSpeed)) <= 32));
 });

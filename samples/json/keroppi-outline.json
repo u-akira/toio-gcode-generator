@@ -11,7 +11,11 @@
     "seg-5": { "speed": 12, "durationScale": 1.25 },
     "seg-6": { "speed": 12, "durationScale": 1.25 },
     "seg-7": { "speed": 12, "durationScale": 1.25 },
-    "seg-8": { "speed": 12, "durationScale": 1.25 }
+    "seg-8": { "speed": 12, "durationScale": 1.25 },
+    "seg-9": { "speed": 12, "durationScale": 1.25 },
+    "seg-10": { "speed": 12, "durationScale": 1.25 },
+    "seg-11": { "speed": 12, "durationScale": 1.25 },
+    "seg-12": { "speed": 12, "durationScale": 1.25 }
   },
   "strokes": [
     {
@@ -96,6 +100,38 @@
         { "x": 189, "y": 321 },
         { "x": 250, "y": 350 },
         { "x": 311, "y": 321 }
+      ]
+    },
+    {
+      "primitives": [
+        {
+          "kind": "arc",
+          "center": { "x": 204, "y": 266 },
+          "radius": 9.85,
+          "startAngle": 303.4,
+          "sweepAngle": 90
+        }
+      ],
+      "raw": [
+        { "x": 169, "y": 231 },
+        { "x": 204, "y": 217 },
+        { "x": 239, "y": 231 }
+      ]
+    },
+    {
+      "primitives": [
+        {
+          "kind": "arc",
+          "center": { "x": 296, "y": 266 },
+          "radius": 9.85,
+          "startAngle": 303.4,
+          "sweepAngle": 90
+        }
+      ],
+      "raw": [
+        { "x": 261, "y": 231 },
+        { "x": 296, "y": 217 },
+        { "x": 331, "y": 231 }
       ]
     }
   ]
