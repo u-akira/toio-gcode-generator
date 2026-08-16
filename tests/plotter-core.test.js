@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const core = require("../plotter-core.js");
 const circleSample = require("../samples/json/circle.json");
 const catFaceSample = require("../samples/json/cat-face.json");
+const keroppiOutlineSample = require("../samples/json/keroppi-outline.json");
 
 function makeStroke(points) {
   return { raw: points.map(([x, y]) => ({ x, y })) };
@@ -266,6 +267,13 @@ test("dead reckoning arc primitive creates one arc motor command", () => {
   assert.ok(drawMotors[0].penPreviewPoints.length > 10);
 });
 
+test("small dead reckoning arcs allow the inner wheel to reverse", () => {
+  const speeds = core.computeArcWheelSpeeds(20, 8, 180, 26);
+
+  assert.equal(speeds.left, 53);
+  assert.equal(speeds.right, -12);
+});
+
 test("circle sample dead reckoning duration is scaled to half", () => {
   const baseSample = {
     ...circleSample,
@@ -303,6 +311,30 @@ test("cat face sample connects straight ears to the lower arc", () => {
   assert.ok(previous);
   assert.ok(core.distance(previous.end, arc.start) < 0.1);
   assert.ok(core.distance(arc.end, result.segments[0].start) < 0.1);
+});
+
+test("keroppi outline sample draws tight outer eyes and side outline arcs slowly", () => {
+  const result = core.createDeadReckoningSimulation({
+    strokes: keroppiOutlineSample.strokes,
+    config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+    segmentSettings: keroppiOutlineSample.deadSegmentSettings,
+  });
+  const drawMotors = result.commands.filter((command) => command.type === "motor" && command.kind === "draw");
+  const drawSegments = result.segments.filter((segment) => segment.kind === "draw");
+  const mouth = drawSegments[4];
+  const leftEyeRadius = Math.hypot(8, 48);
+
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.stats.drawSegments, 5);
+  assert.ok(Math.abs(core.distance(drawSegments[0].start, { x: 201, y: 218 }) - leftEyeRadius) < 1);
+  assert.ok(drawSegments[0].start.x < 170);
+  assert.ok(Math.abs(drawSegments[0].start.x + drawSegments[3].start.x - 500) < 1);
+  assert.ok(Math.abs(drawSegments[0].start.y - drawSegments[3].start.y) < 1);
+  assert.ok(mouth.start.x < 210);
+  assert.ok(mouth.end.x > 290);
+  assert.ok(Math.max(...mouth.penPreviewPoints.map((point) => point.y)) > 345);
+  assert.ok(drawMotors.some((command) => command.leftSpeed < 0 || command.rightSpeed < 0));
+  assert.ok(drawMotors.every((command) => Math.max(Math.abs(command.leftSpeed), Math.abs(command.rightSpeed)) <= 32));
 });
 
 test("dead reckoning uses auto-corrected freehand arcs as one draw motor command", () => {

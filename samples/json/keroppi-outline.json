@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "name": "keroppi-outline",
+  "mat": { "minX": 98, "minY": 142, "maxX": 402, "maxY": 358 },
+  "deadSegmentSettings": {
+    "seg-0": { "speed": 12, "durationScale": 1.25 },
+    "seg-1": { "speed": 12, "durationScale": 1.25 },
+    "seg-2": { "speed": 12, "durationScale": 1.25 },
+    "seg-3": { "speed": 12, "durationScale": 1.25 },
+    "seg-4": { "speed": 12, "durationScale": 1.25 },
+    "seg-5": { "speed": 12, "durationScale": 1.25 },
+    "seg-6": { "speed": 12, "durationScale": 1.25 },
+    "seg-7": { "speed": 12, "durationScale": 1.25 },
+    "seg-8": { "speed": 12, "durationScale": 1.25 }
+  },
+  "strokes": [
+    {
+      "primitives": [
+        {
+          "kind": "arc",
+          "center": { "x": 250, "y": 315 },
+          "radius": 132,
+          "startAngle": 206,
+          "sweepAngle": -50
+        }
+      ],
+      "raw": [
+        { "x": 152, "y": 218 },
+        { "x": 120, "y": 275 },
+        { "x": 112, "y": 339 }
+      ]
+    },
+    {
+      "primitives": [
+        {
+          "kind": "arc",
+          "center": { "x": 201, "y": 218 },
+          "radius": 8,
+          "startAngle": 180,
+          "sweepAngle": 360
+        }
+      ],
+      "raw": [
+        { "x": 201, "y": 169 },
+        { "x": 250, "y": 218 },
+        { "x": 201, "y": 267 },
+        { "x": 152, "y": 218 },
+        { "x": 201, "y": 169 }
+      ]
+    },
+    {
+      "primitives": [
+        {
+          "kind": "arc",
+          "center": { "x": 299, "y": 218 },
+          "radius": 8,
+          "startAngle": 180,
+          "sweepAngle": 360
+        }
+      ],
+      "raw": [
+        { "x": 299, "y": 169 },
+        { "x": 348, "y": 218 },
+        { "x": 299, "y": 267 },
+        { "x": 250, "y": 218 },
+        { "x": 299, "y": 169 }
+      ]
+    },
+    {
+      "primitives": [
+        {
+          "kind": "arc",
+          "center": { "x": 250, "y": 315 },
+          "radius": 132,
+          "startAngle": 334,
+          "sweepAngle": 50
+        }
+      ],
+      "raw": [
+        { "x": 348, "y": 218 },
+        { "x": 380, "y": 275 },
+        { "x": 388, "y": 339 }
+      ]
+    },
+    {
+      "primitives": [
+        {
+          "kind": "arc",
+          "center": { "x": 250, "y": 270 },
+          "radius": 64,
+          "startAngle": 103.13,
+          "sweepAngle": -100
+        }
+      ],
+      "raw": [
+        { "x": 189, "y": 321 },
+        { "x": 250, "y": 350 },
+        { "x": 311, "y": 321 }
+      ]
+    }
+  ]
+}

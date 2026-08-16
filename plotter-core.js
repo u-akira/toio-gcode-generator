@@ -629,7 +629,7 @@
   function computeArcWheelSpeeds(speed, radius, sweepAngle, wheelBaseMm, steeringTrim = 0) {
     const turnSign = sweepAngle >= 0 ? 1 : -1;
     const halfBase = wheelBaseMm / 2;
-    const safeRadius = Math.max(halfBase + 1, Math.abs(radius));
+    const safeRadius = Math.max(1, Math.abs(radius));
     let left = speed * (safeRadius + turnSign * halfBase) / safeRadius;
     let right = speed * (safeRadius - turnSign * halfBase) / safeRadius;
     left += steeringTrim;
