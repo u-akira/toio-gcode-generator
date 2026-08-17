@@ -56,6 +56,9 @@
         if (command.type === "pen" && command.penX != null) {
           lastPenPoint = { x: command.penX, y: command.penY };
         }
+        if (command.type === "wait" && command.penX != null) {
+          lastPenPoint = { x: command.penX, y: command.penY };
+        }
       }
       return { items, durationMs: cursorMs, mode };
     }
@@ -68,6 +71,7 @@
     }
 
     function isPlayableCommand(command, mode) {
+      if (command.type === "wait") return true;
       if (mode === "dead") return command.type === "motor" || command.type === "turn";
       return command.type === "move" || command.type === "rotate";
     }

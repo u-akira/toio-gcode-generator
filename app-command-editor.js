@@ -72,6 +72,8 @@
           if (override.durationMs != null) command.durationMs = override.durationMs;
           command.manualWheelSpeeds = true;
           updateManualTurnPose(command, index);
+        } else if (command.type === "wait") {
+          if (override.ms != null) command.ms = override.ms;
         }
       }
     }
@@ -98,11 +100,16 @@
           durationMs: command.durationMs,
         };
       }
+      if (command.type === "wait") {
+        return {
+          ms: command.ms,
+        };
+      }
       return null;
     }
 
     function commandOverrideKey(command, index, commands) {
-      if (!command || (command.type !== "motor" && command.type !== "turn")) return null;
+      if (!command || (command.type !== "motor" && command.type !== "turn" && command.type !== "wait")) return null;
       const role = command.role || "";
       const segmentId = command.segmentId || "";
       const kind = command.kind || "";

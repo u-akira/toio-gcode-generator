@@ -38,7 +38,7 @@
     downDurationMs: 300,
     penMotorMode: 0,
     settleMs: 250,
-    runMode: "position",
+    runMode: "dead",
     deadTurnSpeed: 12,
     deadTurnBalanceTrim: 0,
     deadTurnMsPer90: 660,
@@ -360,6 +360,8 @@
           this.addSegment(plan, "draw", start, end);
         } else if (primitive.kind === "arc") {
           this.addArcSegment(plan, "draw", primitive);
+        } else if (primitive.kind === "point") {
+          this.addPointMark(plan, primitive);
         }
       }
     }
@@ -367,12 +369,31 @@
     primitiveStartPoint(primitive) {
       if (!primitive) return null;
       if (primitive.kind === "line") return clonePoint(primitive.start);
+      if (primitive.kind === "point") return clonePoint(primitive.point);
       if (primitive.kind === "arc") {
         const arc = normalizeArcPrimitive(primitive);
         if (!arc) return null;
         return cubeToPen(pointOnCircle(arc.center, arc.radius, arc.startAngle), arc.startHeading, this.config);
       }
       return null;
+    }
+
+    addPointMark(plan, primitive) {
+      const point = clonePoint(primitive.point);
+      if (!isFinitePoint(point)) return;
+      const waitMs = pointWaitMs(primitive);
+      const heading = this.currentHeading ?? (Number(this.config.fixedHeading) || 0);
+      const cube = this.currentCube || penToCube(point, heading, this.config);
+      plan.commands.push({ type: "pen", state: "down", penX: point.x, penY: point.y });
+      if (waitMs > 0) plan.commands.push({ type: "wait", ms: waitMs, penX: point.x, penY: point.y });
+      plan.commands.push({ type: "pen", state: "up", penX: point.x, penY: point.y });
+      plan.stats.penDowns += 1;
+      plan.stats.penUps += 1;
+      plan.stats.drawSegments += 1;
+      plan.cubePath.push({ ...cube, theta: heading });
+      this.currentPen = point;
+      this.currentHeading = heading;
+      this.currentCube = { x: cube.x, y: cube.y };
     }
 
     addSegment(plan, kind, start, end) {
@@ -716,6 +737,10 @@
       const start = clonePoint(primitive.start);
       const end = clonePoint(primitive.end);
       return isFinitePoint(start) && isFinitePoint(end) ? [start, end] : [];
+    }
+    if (primitive?.kind === "point") {
+      const point = clonePoint(primitive.point);
+      return isFinitePoint(point) ? [point, point] : [];
     }
     if (primitive?.kind === "arc") {
       const arc = normalizeArcPrimitive(primitive);
@@ -1087,7 +1112,19 @@
         end: clonePoint(primitive.end),
       };
     }
+    if (primitive?.kind === "point") {
+      return {
+        kind: "point",
+        point: clonePoint(primitive.point),
+        waitMs: pointWaitMs(primitive),
+      };
+    }
     return { ...primitive };
+  }
+
+  function pointWaitMs(primitive) {
+    const value = Number(primitive?.waitMs);
+    return clamp(Math.round(Number.isFinite(value) ? value : 1000), 0, 60000);
   }
 
   function isFinitePoint(point) {

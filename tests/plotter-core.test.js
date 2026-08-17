@@ -4,6 +4,7 @@ const core = require("../plotter-core.js");
 const circleSample = require("../samples/json/circle.json");
 const catFaceSample = require("../samples/json/cat-face.json");
 const keroppiOutlineSample = require("../samples/json/keroppi-outline.json");
+const stackChanSample = require("../samples/json/stack-chan.json");
 
 function makeStroke(points) {
   return { raw: points.map(([x, y]) => ({ x, y })) };
@@ -25,6 +26,10 @@ function simulate(stroke, config = {}) {
 
 test("default dead reckoning turn speed is conservative for calibration", () => {
   assert.equal(core.DEFAULT_CONFIG.deadTurnSpeed, 12);
+});
+
+test("default run mode is dead reckoning", () => {
+  assert.equal(core.DEFAULT_CONFIG.runMode, "dead");
 });
 
 test("default dead reckoning turn duration uses direct 90 degree milliseconds", () => {
@@ -550,6 +555,34 @@ test("dead reckoning turn commands keep a practical minimum duration", () => {
 
   assert.ok(smallTurn);
   assert.ok(smallTurn.durationMs >= 150);
+});
+
+test("stack-chan sample marks eyes with one second pen-down waits", () => {
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0 })).plan(stackChanSample.strokes);
+  const waitIndexes = result.commands.map((command, index) => (command.type === "wait" ? index : -1)).filter((index) => index >= 0);
+  const waits = waitIndexes.map((index) => result.commands[index]);
+
+  assert.equal(waits.length, 2);
+  assert.deepEqual(
+    waits.map((command) => command.ms),
+    [1000, 1000],
+  );
+  for (const index of waitIndexes) {
+    assert.equal(result.commands[index - 1].type, "pen");
+    assert.equal(result.commands[index - 1].state, "down");
+    assert.equal(result.commands[index + 1].type, "pen");
+    assert.equal(result.commands[index + 1].state, "up");
+  }
+});
+
+test("stack-chan sample uses a wider raised inner rectangle", () => {
+  const primitives = stackChanSample.strokes[0].primitives;
+  const innerRectangle = primitives.slice(4, 8);
+
+  assert.deepEqual(innerRectangle[0].start, { x: 184, y: 194 });
+  assert.deepEqual(innerRectangle[0].end, { x: 316, y: 194 });
+  assert.deepEqual(innerRectangle[2].start, { x: 316, y: 278 });
+  assert.deepEqual(innerRectangle[2].end, { x: 184, y: 278 });
 });
 
 test("signed angle delta returns the shortest turn", () => {
