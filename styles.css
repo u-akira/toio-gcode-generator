@@ -516,11 +516,42 @@ h2 {
   color: #202124;
 }
 
-.command-step-button {
+.command-step-button,
+.command-step-static {
+  align-self: start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
   min-height: 26px;
-  padding: 3px 0;
+  padding: 3px 6px;
+  border: 1px solid #b9d5ce;
+  border-radius: 999px;
+  background: #e8f2ef;
+  color: var(--accent-strong);
   font-size: 11px;
+  font-weight: 700;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  line-height: 1;
+}
+
+.command-step-static {
+  border-color: #d8d3c8;
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.72;
+}
+
+.command-step-button:hover {
+  border-color: var(--accent);
+  background: #dcece8;
+}
+
+.command-row.active .command-step-button {
+  border-color: #f59e0b;
+  background: #f59e0b;
+  color: #fff;
 }
 
 .command-main {
@@ -538,12 +569,22 @@ h2 {
   margin-top: 5px;
 }
 
+.command-fields-wait {
+  display: flex;
+}
+
 .command-fields label {
   display: grid;
   gap: 2px;
   color: var(--muted);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 10px;
+}
+
+.command-fields .command-unit-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .command-fields input {
@@ -557,6 +598,10 @@ h2 {
   color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 11px;
+}
+
+.command-unit-field input {
+  width: 90px;
 }
 
 .mini-log {

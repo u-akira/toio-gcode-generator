@@ -26,6 +26,8 @@
       draw,
     } = deps;
 
+    let lastScrolledCommandIndex = -1;
+
     function captureCommandOverrides() {
       const simulation = getSimulation();
       const commandOverrides = getCommandOverrides();
@@ -125,10 +127,12 @@
       if (!outputEl) return;
       if (!getSimulationValid() || !simulation) {
         outputEl.textContent = "Simulate after drawing to show commands.";
+        lastScrolledCommandIndex = -1;
         syncSimulationControls();
         return;
       }
       outputEl.innerHTML = simulation.commands.map((command, index) => commandRowTemplate(command, index)).filter(Boolean).join("");
+      lastScrolledCommandIndex = -1;
       syncSimulationControls();
       updateActiveCommandRow();
     }
@@ -136,12 +140,17 @@
     function commandRowTemplate(command, index) {
       const label = isDeadMode() ? formatDeadToioCommand(command) : formatPositionToioCommand(command);
       if (!label) return "";
+      const controls = commandControlsTemplate(command, index);
+      const step = String(index + 1).padStart(2, "0");
+      const stepControl = controls
+        ? `<button class="command-step-button" type="button" data-command-step="${index}">${step}</button>`
+        : `<span class="command-step-static" aria-hidden="true">${step}</span>`;
       return `
     <div class="command-row" data-command-index="${index}">
-      <button class="command-step-button" type="button" data-command-step="${index}">${String(index + 1).padStart(2, "0")}</button>
+      ${stepControl}
       <div class="command-main">
         <div class="command-label">${escapeHtml(label)}</div>
-        ${commandControlsTemplate(command, index)}
+        ${controls}
       </div>
     </div>
   `;
@@ -190,7 +199,14 @@
     `;
       }
       if (command.type === "wait") {
-        return `<div class="command-fields">${commandInputTemplate(index, "ms", "ms", command.ms, 10, 0, 10000)}</div>`;
+        return `
+      <div class="command-fields command-fields-wait">
+        <label class="command-unit-field">
+          <input data-command-index="${index}" data-command-key="ms" type="number" min="0" max="10000" step="10" value="${Number(command.ms || 0).toFixed(0)}" />
+          <span>ms</span>
+        </label>
+      </div>
+    `;
       }
       return "";
     }
@@ -244,9 +260,27 @@
     function updateActiveCommandRow() {
       if (!outputEl?.querySelectorAll) return;
       const activeCommandIndex = deps.getActiveCommandIndex();
+      let activeRow = null;
       for (const row of outputEl.querySelectorAll(".command-row")) {
-        row.classList.toggle("active", Number(row.dataset.commandIndex) === activeCommandIndex);
+        const isActive = Number(row.dataset.commandIndex) === activeCommandIndex;
+        row.classList.toggle("active", isActive);
+        if (isActive) activeRow = row;
       }
+      if (activeCommandIndex < 0) {
+        lastScrolledCommandIndex = -1;
+        return;
+      }
+      if (activeRow && activeCommandIndex !== lastScrolledCommandIndex) {
+        scrollCommandRowIntoView(activeRow);
+        lastScrolledCommandIndex = activeCommandIndex;
+      }
+    }
+
+    function scrollCommandRowIntoView(row) {
+      if (!outputEl || !row.getBoundingClientRect || !outputEl.getBoundingClientRect) return;
+      const targetOffset = 36;
+      const rowTop = row.getBoundingClientRect().top - outputEl.getBoundingClientRect().top + outputEl.scrollTop;
+      outputEl.scrollTop = Math.max(0, rowTop - targetOffset);
     }
 
     function updateCommandEdit(input, { render = true } = {}) {

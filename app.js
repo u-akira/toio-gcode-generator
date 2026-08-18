@@ -777,7 +777,7 @@ function formatDeadToioCommand(command) {
     if (command.geometry === "arc") return `move: ${label} / R:${Math.round(command.rightSpeed)}, L:${Math.round(command.leftSpeed)}, ${formatSeconds(command.durationMs)}`;
     return `move: ${label} / speed:${motorStraightSpeed(command)}, ${formatSeconds(command.durationMs)}`;
   }
-  if (command.type === "wait") return `wait: ${formatSeconds(command.ms)}`;
+  if (command.type === "wait") return "wait";
   return null;
 }
 
@@ -793,7 +793,7 @@ function formatPositionToioCommand(command) {
   if (command.type === "move" || command.type === "rotate") {
     return `move: ${command.type} x:${command.x.toFixed(1)}, y:${command.y.toFixed(1)}, theta:${command.theta.toFixed(0)}, speed:${command.speed}`;
   }
-  if (command.type === "wait") return `wait: ${formatSeconds(command.ms)}`;
+  if (command.type === "wait") return "wait";
   return null;
 }
 
