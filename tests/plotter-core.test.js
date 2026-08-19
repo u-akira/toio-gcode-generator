@@ -304,7 +304,7 @@ test("circle sample dead reckoning duration is scaled to half", () => {
 
 test("cat face sample connects straight ears to the lower arc", () => {
   const result = core.createDeadReckoningSimulation({
-    strokes: catFaceSample.strokes,
+    strokes: [catFaceSample.strokes[0]],
     config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
   });
   const arc = result.segments.find((segment) => segment.geometry === "arc");
@@ -316,6 +316,25 @@ test("cat face sample connects straight ears to the lower arc", () => {
   assert.ok(previous);
   assert.ok(core.distance(previous.end, arc.start) < 0.1);
   assert.ok(core.distance(arc.end, result.segments[0].start) < 0.1);
+});
+
+test("cat face sample marks eyes with waits and four straight whiskers", () => {
+  const result = core.createDeadReckoningSimulation({
+    strokes: catFaceSample.strokes,
+    config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+  });
+  const waits = result.commands.filter((command) => command.type === "wait");
+  const whiskerStrokes = catFaceSample.strokes.slice(3);
+
+  assert.deepEqual(
+    waits.map((command) => ({ ms: command.ms, penX: command.penX, penY: command.penY })),
+    [
+      { ms: 1000, penX: 222, penY: 245 },
+      { ms: 1000, penX: 278, penY: 245 },
+    ],
+  );
+  assert.equal(whiskerStrokes.length, 4);
+  assert.ok(whiskerStrokes.every((stroke) => stroke.primitives.length === 1 && stroke.primitives[0].kind === "line"));
 });
 
 test("keroppi outline sample draws tight outer eyes and side outline arcs slowly", () => {
