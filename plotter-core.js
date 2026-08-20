@@ -52,7 +52,9 @@
   const RIGHT_ANGLE_DEG = 90;
   const RIGHT_ANGLE_TOLERANCE_DEG = 18;
   const MIN_ARC_SWEEP_DEG = 15;
-  const MAX_ARC_SWEEP_DEG = 270;
+  const MAX_ARC_SWEEP_DEG = 360;
+  const CLOSED_ARC_SWEEP_DEG = 300;
+  const CLOSED_ARC_GAP_RADIUS_RATIO = 0.35;
   const MIN_PEN_ARC_RADIUS_MM = 8;
 
   function withDefaults(config = {}) {
@@ -117,7 +119,7 @@
     if (reduced.length < 2) return { processed: fallback, primitives: null };
     const smoothed = smoothPoints(reduced, config.smoothing);
     const shaped = fitShapePrimitives(smoothed, config);
-    if (!shaped?.primitives?.length) return { processed: fallback, primitives: null };
+    if (!shaped?.primitives?.length) return { processed: fallback, primitives: null, error: shaped?.error || "形状を補正できませんでした。" };
     return shaped;
   }
 
@@ -925,12 +927,18 @@
     }
 
     const line = fitLinePrimitive(points);
+    const maxLineError = Math.max(1, tolerance * 2.5);
+    const isStraight = line.avgError <= tolerance && line.maxError <= maxLineError;
     const arc = fitArcPrimitive(points, config, tolerance);
     if (arc && arc.avgError <= line.avgError * 0.7) {
       return {
         processed: primitivePreviewPoints(arc.primitive, config),
         primitives: [arc.primitive],
       };
+    }
+
+    if (!isStraight) {
+      return { error: arc?.error || "直線または円弧として安定して補正できませんでした。" };
     }
 
     return {
@@ -978,9 +986,12 @@
   function fitArcPrimitive(points, config, tolerance) {
     if (points.length < 3) return null;
     const circle = fitCircle(points);
-    if (!circle || circle.radius < MIN_PEN_ARC_RADIUS_MM) return null;
-    const sweep = signedSweepAngle(points, circle.center);
-    if (Math.abs(sweep) < MIN_ARC_SWEEP_DEG || Math.abs(sweep) > MAX_ARC_SWEEP_DEG) return null;
+    if (!circle) return { error: "円の中心を安定して推定できませんでした。" };
+    if (circle.radius < MIN_PEN_ARC_RADIUS_MM) return { error: "円弧の半径が小さすぎます。" };
+    let sweep = signedSweepAngle(points, circle.center);
+    const absSweep = Math.abs(sweep);
+    if (absSweep < MIN_ARC_SWEEP_DEG) return { error: "円弧として認識するには曲がりが小さすぎます。" };
+    if (absSweep > MAX_ARC_SWEEP_DEG) return { error: "円弧の回転量が大きすぎます。" };
 
     let totalError = 0;
     let maxError = 0;
@@ -990,10 +1001,15 @@
       maxError = Math.max(maxError, error);
     }
     const avgError = totalError / Math.max(1, points.length);
-    if (avgError > tolerance || maxError > Math.max(1, tolerance * 2.5)) return null;
+    if (avgError > tolerance || maxError > Math.max(1, tolerance * 2.5)) return { error: "半径のばらつきが大きすぎます。" };
+
+    const endpointGap = distance(points[0], points[points.length - 1]);
+    if (absSweep >= CLOSED_ARC_SWEEP_DEG && endpointGap <= circle.radius * CLOSED_ARC_GAP_RADIUS_RATIO) {
+      sweep = sweep >= 0 ? 360 : -360;
+    }
 
     const primitive = penArcToCubeArc(circle, points, sweep, config);
-    if (!primitive) return null;
+    if (!primitive) return { error: "toio のペン位置ではこの円弧を走行軌道に変換できません。" };
     return { primitive, avgError, maxError };
   }
 

@@ -1146,6 +1146,12 @@ function pointerUp(event) {
   event.preventDefault();
   if (activeStroke.raw.length > 1) {
     const shaped = processFreehandStroke(activeStroke.raw);
+    if (shaped.error) {
+      log(`円弧として補正できませんでした: ${shaped.error} 描いた線をクリアしました。`);
+      activeStroke = null;
+      draw();
+      return;
+    }
     activeStroke.processed = shaped.processed;
     activeStroke.primitives = shaped.primitives;
     strokes.push(activeStroke);

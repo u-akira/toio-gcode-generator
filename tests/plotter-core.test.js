@@ -144,6 +144,41 @@ test("freehand shape correction turns a curved stroke into one arc primitive", (
   assert.ok(shape.processed.length > 2);
 });
 
+test("freehand shape correction closes a nearly complete circle", () => {
+  const points = [];
+  for (let angle = 0; angle <= 340; angle += 20) {
+    points.push({
+      x: 250 + 70 * Math.cos((angle * Math.PI) / 180),
+      y: 250 + 70 * Math.sin((angle * Math.PI) / 180),
+    });
+  }
+  const shape = core.processStrokeShape(
+    points,
+    core.withDefaults({ smoothing: 0, minPointDistance: 1, lineCorrection: 1, lineTolerance: 4, minSegmentLength: 0, penOffsetX: -48, penOffsetY: 0 }),
+  );
+
+  assert.equal(shape.primitives.length, 1);
+  assert.equal(shape.primitives[0].kind, "arc");
+  assert.equal(shape.primitives[0].sweepAngle, 360);
+});
+
+test("freehand shape correction rejects curved strokes that are not stable arcs", () => {
+  const shape = core.processStrokeShape(
+    [
+      { x: 170, y: 250 },
+      { x: 195, y: 222 },
+      { x: 220, y: 282 },
+      { x: 245, y: 225 },
+      { x: 270, y: 278 },
+      { x: 295, y: 250 },
+    ],
+    core.withDefaults({ smoothing: 0, minPointDistance: 1, lineCorrection: 1, lineTolerance: 4, minSegmentLength: 0 }),
+  );
+
+  assert.equal(shape.primitives, null);
+  assert.match(shape.error, /補正できません|ばらつき/);
+});
+
 test("safe area setting affects simulation errors", () => {
   const stroke = makeStroke([
     [112, 152],
