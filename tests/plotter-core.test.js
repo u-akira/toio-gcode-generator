@@ -27,7 +27,7 @@ function simulate(stroke, config = {}) {
 }
 
 test("default dead reckoning turn speed is conservative for calibration", () => {
-  assert.equal(core.DEFAULT_CONFIG.deadTurnSpeed, 12);
+  assert.equal(core.DEFAULT_CONFIG.deadTurnSpeed, 8);
 });
 
 test("default run mode is dead reckoning", () => {
@@ -35,8 +35,8 @@ test("default run mode is dead reckoning", () => {
 });
 
 test("default dead reckoning turn duration uses direct 90 degree milliseconds", () => {
-  assert.equal(core.DEFAULT_CONFIG.deadTurnMsPer90, 660);
-  assert.equal(core.computeTurnDurationMs(90, core.withDefaults()), 660);
+  assert.equal(core.DEFAULT_CONFIG.deadTurnMsPer90, 990);
+  assert.equal(core.computeTurnDurationMs(90, core.withDefaults()), 990);
 });
 
 test("pen front/back offset changes simulated cube path", () => {

@@ -88,6 +88,20 @@
         saved.penOffsetY = DEFAULT_CONFIG.penOffsetY;
         changed = true;
       }
+      if (savedVersion < 29) {
+        if (saved.settleMs == null || saved.settleMs === 250) {
+          saved.settleMs = DEFAULT_CONFIG.settleMs;
+          changed = true;
+        }
+        if (saved.deadTurnSpeed == null || saved.deadTurnSpeed === 12) {
+          saved.deadTurnSpeed = DEFAULT_CONFIG.deadTurnSpeed;
+          changed = true;
+        }
+        if (saved.deadTurnMsPer90 == null || saved.deadTurnMsPer90 === 660) {
+          saved.deadTurnMsPer90 = DEFAULT_CONFIG.deadTurnMsPer90;
+          changed = true;
+        }
+      }
       if (Object.prototype.hasOwnProperty.call(saved, "runMode")) {
         delete saved.runMode;
         changed = true;

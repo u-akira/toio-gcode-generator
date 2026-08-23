@@ -16,7 +16,7 @@
 
   const NATIVE_MAT = { ...MAT };
   const DEFAULT_CONFIG = {
-    configVersion: 28,
+    configVersion: 29,
     safeScale: 0.75,
     fixedHeading: 0,
     penOffsetX: -48,
@@ -37,11 +37,11 @@
     downMotorSpeed: 30,
     downDurationMs: 300,
     penMotorMode: 0,
-    settleMs: 250,
+    settleMs: 700,
     runMode: "dead",
-    deadTurnSpeed: 12,
+    deadTurnSpeed: 8,
     deadTurnBalanceTrim: 0,
-    deadTurnMsPer90: 660,
+    deadTurnMsPer90: 990,
     deadMmPerSecAtDrawSpeed: 30,
     deadMmPerSecAtTravelSpeed: 70,
     deadTravelDistanceScale: 1,
