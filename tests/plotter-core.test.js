@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 const core = require("../plotter-core.js");
 const circleSample = require("../samples/json/circle.json");
 const catFaceSample = require("../samples/json/cat-face.json");
+const coderSample = require("../samples/json/coder.json");
+const dojoSample = require("../samples/json/dojo.json");
 const keroppiOutlineSample = require("../samples/json/keroppi-outline.json");
 const stackChanSample = require("../samples/json/stack-chan.json");
 
@@ -637,6 +639,34 @@ test("stack-chan sample uses a wider raised inner rectangle", () => {
   assert.deepEqual(innerRectangle[0].end, { x: 316, y: 194 });
   assert.deepEqual(innerRectangle[2].start, { x: 316, y: 278 });
   assert.deepEqual(innerRectangle[2].end, { x: 184, y: 278 });
+});
+
+test("coder and dojo samples use straight segments for lowercase o", () => {
+  for (const sample of [coderSample, dojoSample]) {
+    const result = core.createDeadReckoningSimulation({
+      strokes: sample.strokes,
+      config: core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: -48, penOffsetY: 0 }),
+    });
+    const hasSpin = sample.strokes.some((stroke) => stroke.primitives?.some((primitive) => primitive.kind === "spin"));
+    const closedLineO = sample.strokes.some((stroke) => {
+      const primitives = stroke.primitives || [];
+      if (primitives.length !== 8 || !primitives.every((primitive) => primitive.kind === "line")) return false;
+      return core.distance(primitives[0].start, primitives[primitives.length - 1].end) < 0.1;
+    });
+
+    assert.deepEqual(result.errors, []);
+    assert.equal(hasSpin, false);
+    assert.equal(closedLineO, true);
+  }
+});
+
+test("dojo sample draws the j dot with the same point wait as stack-chan eyes", () => {
+  const dojoDot = dojoSample.strokes.flatMap((stroke) => stroke.primitives || []).find((primitive) => primitive.kind === "point");
+  const stackChanEye = stackChanSample.strokes[0].primitives.find((primitive) => primitive.kind === "point");
+
+  assert.ok(dojoDot);
+  assert.ok(stackChanEye);
+  assert.equal(dojoDot.waitMs, stackChanEye.waitMs);
 });
 
 test("signed angle delta returns the shortest turn", () => {

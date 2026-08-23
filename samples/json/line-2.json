@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "name": "line-2",
+  "name": "parallel-lines",
   "mat": { "minX": 98, "minY": 142, "maxX": 402, "maxY": 358 },
   "strokes": [
     { "raw": [{ "x": 180, "y": 225 }, { "x": 320, "y": 225 }] },
