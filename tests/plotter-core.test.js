@@ -468,6 +468,20 @@ test("dead reckoning straight motor durations use 10ms steps", () => {
   assert.equal(motor.durationMs % 10, 0);
 });
 
+test("dead reckoning straight motor duration is not capped to one toio packet", () => {
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadMmPerSecAtDrawSpeed: 30 })).plan([
+    makeStroke([
+      [180, 260],
+      [196, 178],
+    ]),
+  ]);
+  const motor = result.commands.find((command) => command.type === "motor" && command.kind === "draw");
+
+  assert.ok(motor);
+  assert.ok(motor.durationMs > 2550);
+  assert.equal(motor.durationMs % 10, 0);
+});
+
 test("dead reckoning inserts travel between separate strokes", () => {
   const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0 })).plan([
       makeStroke([

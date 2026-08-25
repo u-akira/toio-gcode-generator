@@ -31,8 +31,6 @@
 
     const A3_PREVIEW_WIDTH_MM = 420;
     const A3_PREVIEW_HEIGHT_MM = 297;
-    const DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED = 57;
-
     function getDrawingBounds() {
       if (isDeadMode()) {
         const centerX = (MAT.minX + MAT.maxX) / 2;
@@ -392,8 +390,8 @@
     }
 
     function commandPointOrCurrentPen(command, state) {
-      if (state.currentPen) return { ...state.currentPen };
       if (command.penX != null && command.penY != null) return { x: command.penX, y: command.penY };
+      if (state.currentPen) return { ...state.currentPen };
       return null;
     }
 
@@ -406,7 +404,7 @@
 
     function replayTurnCommand(command, state, config) {
       const theta = command.theta ?? state.currentTheta ?? 0;
-      if (!state.currentCube && command.x != null && command.y != null) {
+      if (command.x != null && command.y != null) {
         state.currentCube = { x: command.x, y: command.y };
       }
       if (!state.currentCube) {
@@ -433,8 +431,8 @@
 
       const theta = command.theta ?? state.currentTheta ?? 0;
       const startCube =
-        state.currentCube ||
         finitePoint(command.fromX, command.fromY) ||
+        state.currentCube ||
         (state.currentPen ? penToCube(state.currentPen, theta, config) : null) ||
         finitePoint(command.x, command.y);
       if (!startCube) return;
@@ -498,7 +496,7 @@
       const target = state.penState === "down" ? state.downPoints : state.upPoints;
       const previous = target[target.length - 1];
       if (!previous || Math.hypot(previous.x - point.x, previous.y - point.y) >= 0.01) target.push(point);
-      if (segmentId) {
+      if (segmentId && state.penState === "down") {
         const segmentPath = state.segmentPenPaths.get(segmentId) || [];
         const lastSegmentPoint = segmentPath[segmentPath.length - 1];
         if (!lastSegmentPoint || Math.hypot(lastSegmentPoint.x - point.x, lastSegmentPoint.y - point.y) >= 0.01) segmentPath.push(point);
@@ -524,11 +522,13 @@
       }
       const draw = command.kind === "draw";
       const baseSpeed = Math.max(1, Math.abs(Number(draw ? config.drawSpeed : config.travelSpeed) || 1));
-      const mmPerSec = draw
-        ? DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED
-        : Math.max(1, Number(config.deadMmPerSecAtTravelSpeed) || 1);
+      const mmPerSec = draw ? deadDrawMmPerSec(config) : Math.max(1, Number(config.deadMmPerSecAtTravelSpeed) || 1);
       const speed = command.speed ?? (((Number(command.leftSpeed) || 0) + (Number(command.rightSpeed) || 0)) / 2);
       return mmPerSec * ((Number(speed) || 0) / baseSpeed) * ((command.durationMs || 0) / 1000);
+    }
+
+    function deadDrawMmPerSec(config) {
+      return Math.max(1, Number(config.deadMmPerSecAtDrawSpeed) || 30);
     }
 
     function drawCubePath(points) {

@@ -13,7 +13,6 @@
       formatPositionToioCommand,
       escapeHtml,
       commandDurationMs,
-      roundToMotorDurationMs,
       clamp,
       minTurnDurationMs,
       turnWheelSpeeds,
@@ -29,8 +28,6 @@
     } = deps;
 
     let lastScrolledCommandIndex = -1;
-    const DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED = 57;
-
     function captureCommandOverrides() {
       const simulation = getSimulation();
       const commandOverrides = getCommandOverrides();
@@ -63,7 +60,7 @@
             if (override.durationMs != null) command.durationMs = override.durationMs;
             if (override.distanceScale != null && override.durationMs == null) {
               command.distanceScale = override.distanceScale;
-              command.durationMs = roundToMotorDurationMs(Math.max(10, command.baseMotion.durationMs * command.distanceScale));
+              command.durationMs = roundDurationInputMs(Math.max(10, command.baseMotion.durationMs * command.distanceScale));
             } else if (override.durationMs != null) {
               command.distanceScale = motorDistanceScale(command);
             }
@@ -444,7 +441,7 @@
       const config = getConfig();
       const draw = command.kind === "draw";
       const baseSpeed = Math.max(1, Math.abs(Number(draw ? config.drawSpeed : config.travelSpeed) || 1));
-      const mmPerSec = draw ? DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED : Math.max(1, Number(config.deadMmPerSecAtTravelSpeed) || 1);
+      const mmPerSec = draw ? deadDrawMmPerSec(config) : Math.max(1, Number(config.deadMmPerSecAtTravelSpeed) || 1);
       const speed = command.speed ?? (((Number(command.leftSpeed) || 0) + (Number(command.rightSpeed) || 0)) / 2);
       return mmPerSec * ((Number(speed) || 0) / baseSpeed) * ((command.durationMs || 0) / 1000);
     }
@@ -454,8 +451,12 @@
       const config = getConfig();
       const baseSpeed = Math.max(1, Math.abs(Number(config.drawSpeed) || 1));
       const speedScale = (Number(command.speed) || 0) / baseSpeed;
-      const previewDistance = DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED * speedScale * ((command.durationMs || 0) / 1000);
+      const previewDistance = deadDrawMmPerSec(config) * speedScale * ((command.durationMs || 0) / 1000);
       return previewDistance / baseDistance;
+    }
+
+    function deadDrawMmPerSec(config) {
+      return Math.max(1, Number(config.deadMmPerSecAtDrawSpeed) || 30);
     }
 
     function deadRelativeMotionScale(command, base) {

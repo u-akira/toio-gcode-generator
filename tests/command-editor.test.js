@@ -115,15 +115,31 @@ test("dead line command reflow starts following travel at the edited endpoint", 
   const editor = loadCommandEditor({
     commands,
     overrides: new Map(),
-    getConfig: () => ({ drawSpeed: 20, travelSpeed: 20, deadMmPerSecAtTravelSpeed: 70 }),
+    getConfig: () => ({ drawSpeed: 20, travelSpeed: 20, deadMmPerSecAtDrawSpeed: 30, deadMmPerSecAtTravelSpeed: 70 }),
   });
 
   editor.reflowDeadLineCommandPath();
 
-  assert.equal(commands[1].penX, 57);
-  assert.equal(commands[2].penX, 57);
-  assert.equal(commands[3].x, 57);
-  assert.equal(commands[4].fromX, 57);
+  assert.equal(commands[1].penX, 30);
+  assert.equal(commands[2].penX, 30);
+  assert.equal(commands[3].x, 30);
+  assert.equal(commands[4].fromX, 30);
+});
+
+test("dead draw reflow uses configured draw millimeters per second", () => {
+  const commands = [
+    { type: "pen", state: "down", penX: 0, penY: 0 },
+    { type: "motor", kind: "draw", geometry: "line", segmentId: "seg-0", speed: 20, durationMs: 2780, fromX: 0, fromY: 0, x: 999, y: 0, theta: 0 },
+  ];
+  const editor = loadCommandEditor({
+    commands,
+    overrides: new Map(),
+    getConfig: () => ({ drawSpeed: 20, travelSpeed: 20, deadMmPerSecAtDrawSpeed: 30, deadMmPerSecAtTravelSpeed: 70 }),
+  });
+
+  editor.reflowDeadLineCommandPath();
+
+  assert.ok(Math.abs(commands[1].penX - 83.4) < 0.001);
 });
 
 test("commands without inputs render non-clickable step badges", () => {

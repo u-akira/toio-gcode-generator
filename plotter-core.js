@@ -641,12 +641,12 @@
 
   function computeStraightDurationMs(lengthMm, speed, baseSpeed, baseMmPerSec, durationScale) {
     const mmPerSec = Math.max(1, baseMmPerSec * (speed / Math.max(1, baseSpeed)));
-    return roundToMotorDurationMs(Math.max(10, (lengthMm / mmPerSec) * 1000 * durationScale));
+    return roundMotionDurationMs(Math.max(10, (lengthMm / mmPerSec) * 1000 * durationScale));
   }
 
   function computeUnclampedMotionDurationMs(lengthMm, speed, baseSpeed, baseMmPerSec, durationScale) {
     const mmPerSec = Math.max(1, baseMmPerSec * (speed / Math.max(1, baseSpeed)));
-    return Math.max(10, Math.round(((lengthMm / mmPerSec) * 1000 * durationScale) / 10) * 10);
+    return roundMotionDurationMs((lengthMm / mmPerSec) * 1000 * durationScale);
   }
 
   function computeArcWheelSpeeds(speed, radius, sweepAngle, wheelBaseMm, steeringTrim = 0) {
@@ -678,6 +678,10 @@
 
   function roundToMotorDurationMs(durationMs) {
     return clamp(Math.round(durationMs / 10), 1, 255) * 10;
+  }
+
+  function roundMotionDurationMs(durationMs) {
+    return Math.max(10, Math.round(durationMs / 10) * 10);
   }
 
   function computeTurnWheelSpeeds(angleDeg, turnSpeed, balanceTrim) {

@@ -14,8 +14,6 @@
       minTurnDurationMs,
     } = deps;
 
-    const DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED = 57;
-
     function buildSimulationTimeline(commands) {
       const mode = simulationModeForCommands(commands);
       const config = getConfig();
@@ -163,6 +161,22 @@
           penPreviewPoints: previewEnd(command.penPreviewPoints, penPoint),
         };
       }
+      if (command.type === "motor" && command.x != null && command.y != null && command.fromX != null && command.fromY != null) {
+        const span = Math.max(1, item.endMs - item.startMs);
+        const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
+        const fromCube = {
+          x: command.fromX,
+          y: command.fromY,
+          theta: command.startTheta ?? item.fromCubePose?.theta ?? command.theta ?? 0,
+        };
+        const theta = command.theta ?? fromCube.theta;
+        const cubePoint = {
+          x: fromCube.x + (command.x - fromCube.x) * t,
+          y: fromCube.y + (command.y - fromCube.y) * t,
+        };
+        const penPoint = cubeToPen(cubePoint, theta, config);
+        return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y };
+      }
       if (command.type === "motor" && command.x != null && command.y != null && item.fromCubePose) {
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
@@ -171,24 +185,13 @@
           y: item.fromCubePose.y,
           theta: item.fromCubePose.theta,
         };
-        const theta = command.theta ?? fromCube.theta;
         const cubePoint = {
           x: fromCube.x + (command.x - fromCube.x) * t,
           y: fromCube.y + (command.y - fromCube.y) * t,
         };
+        const theta = command.theta ?? fromCube.theta;
         const penPoint = cubeToPen(cubePoint, theta, config);
-        return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y, previewProgress: t };
-      }
-      if (command.type === "motor" && command.x != null && command.y != null && command.fromX != null && command.fromY != null) {
-        const span = Math.max(1, item.endMs - item.startMs);
-        const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
-        const cubePoint = {
-          x: command.fromX + (command.x - command.fromX) * t,
-          y: command.fromY + (command.y - command.fromY) * t,
-        };
-        const theta = command.theta || 0;
-        const penPoint = cubeToPen(cubePoint, theta, config);
-        return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y, previewProgress: t };
+        return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y };
       }
       return command;
     }
@@ -199,11 +202,13 @@
       }
       const draw = command.kind === "draw";
       const baseSpeed = Math.max(1, Math.abs(Number(draw ? config.drawSpeed : config.travelSpeed) || 1));
-      const mmPerSec = draw
-        ? DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED
-        : Math.max(1, Number(config.deadMmPerSecAtTravelSpeed) || 1);
+      const mmPerSec = draw ? deadDrawMmPerSec(config) : Math.max(1, Number(config.deadMmPerSecAtTravelSpeed) || 1);
       const speed = command.speed ?? (((Number(command.leftSpeed) || 0) + (Number(command.rightSpeed) || 0)) / 2);
       return mmPerSec * ((Number(speed) || 0) / baseSpeed) * ((command.durationMs || 0) / 1000);
+    }
+
+    function deadDrawMmPerSec(config) {
+      return Math.max(1, Number(config.deadMmPerSecAtDrawSpeed) || 30);
     }
 
     function partialPositionCommand(item, elapsedMs) {

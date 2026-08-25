@@ -122,3 +122,99 @@ test("dead command preview uses command endpoints for straight draw lines", () =
   assert.equal(preview.penDownSegments[0].at(-1).x, 90);
   assert.equal(preview.finalCubePose.x, 90);
 });
+
+test("dead command preview uses motor from coordinates over stale replay state", () => {
+  const config = core.withDefaults({ drawSpeed: 20, penOffsetX: 0, penOffsetY: 0 });
+  const renderer = loadCanvasRenderer({ config });
+  const preview = renderer.__test.buildDeadCommandPreview([
+    {
+      type: "motor",
+      kind: "travel",
+      geometry: "line",
+      fromX: 0,
+      fromY: 0,
+      x: 100,
+      y: 0,
+      theta: 0,
+      durationMs: 100,
+      penX: 100,
+      penY: 0,
+    },
+    {
+      type: "turn",
+      x: 100,
+      y: 0,
+      theta: 0,
+      durationMs: 100,
+      penX: 100,
+      penY: 0,
+    },
+    { type: "pen", state: "down", penX: 40, penY: 20 },
+    {
+      type: "motor",
+      kind: "draw",
+      geometry: "line",
+      fromX: 40,
+      fromY: 20,
+      x: 80,
+      y: 20,
+      theta: 0,
+      durationMs: 100,
+      penX: 80,
+      penY: 20,
+    },
+    { type: "pen", state: "up", penX: 80, penY: 20 },
+  ]);
+
+  assert.equal(preview.penDownSegments.length, 1);
+  assert.equal(preview.penDownSegments[0].length, 2);
+  assert.equal(preview.penDownSegments[0][0].x, 40);
+  assert.equal(preview.penDownSegments[0][0].y, 20);
+  assert.equal(preview.penDownSegments[0][1].x, 80);
+  assert.equal(preview.penDownSegments[0][1].y, 20);
+});
+
+test("dead segment highlight path ignores pen-up transition commands", () => {
+  const config = core.withDefaults({ drawSpeed: 20, penOffsetX: 0, penOffsetY: 0 });
+  const renderer = loadCanvasRenderer({ config });
+  const preview = renderer.__test.buildDeadCommandPreview([
+    {
+      type: "motor",
+      kind: "travel",
+      geometry: "line",
+      segmentId: "seg-1",
+      fromX: 0,
+      fromY: 0,
+      x: 100,
+      y: 0,
+      theta: 0,
+      durationMs: 100,
+      penX: 100,
+      penY: 0,
+    },
+    { type: "turn", segmentId: "seg-1", x: 100, y: 0, theta: 90, durationMs: 100, penX: 100, penY: 0 },
+    { type: "pen", state: "down", penX: 10, penY: 20 },
+    {
+      type: "motor",
+      kind: "draw",
+      geometry: "line",
+      segmentId: "seg-1",
+      fromX: 10,
+      fromY: 20,
+      x: 50,
+      y: 20,
+      theta: 0,
+      durationMs: 100,
+      penX: 50,
+      penY: 20,
+    },
+    { type: "pen", state: "up", penX: 50, penY: 20 },
+  ]);
+  const path = preview.segmentPenPaths.get("seg-1");
+
+  assert.equal(path.length, 2);
+  assert.equal(path[0].x, 10);
+  assert.equal(path[0].y, 20);
+  assert.equal(path[1].x, 50);
+  assert.equal(path[1].y, 20);
+});

@@ -66,10 +66,10 @@ test("dead reckoning motor animation uses dead timeline without position turn ap
   assert.equal(frame.x, 100);
   assert.equal(frame.y, 150);
   assert.equal(frame.theta, 0);
-  assert.equal(frame.previewProgress, 0.5);
+  assert.equal(frame.previewProgress, undefined);
 });
 
-test("dead reckoning motor animation starts from the previous command pose", () => {
+test("dead reckoning motor animation starts from the motor command from pose", () => {
   const config = core.withDefaults({ penOffsetX: -48, penOffsetY: 0 });
   const commands = [
     {
@@ -103,10 +103,10 @@ test("dead reckoning motor animation starts from the previous command pose", () 
   const midFrame = tools.commandsAtElapsed(timeline, travelItem.startMs + 500).at(-1);
 
   assert.equal(frame.type, "motor");
-  assert.equal(frame.x, 10);
-  assert.equal(frame.y, 20);
-  assert.equal(Math.round(midFrame.x), 10);
-  assert.equal(Math.round(midFrame.y), 70);
+  assert.equal(frame.x, 200);
+  assert.equal(frame.y, 200);
+  assert.equal(Math.round(midFrame.x), 105);
+  assert.equal(Math.round(midFrame.y), 160);
 });
 
 test("dead reckoning motor animation interpolates to the command endpoint", () => {
