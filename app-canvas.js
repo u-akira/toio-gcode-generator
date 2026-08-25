@@ -121,6 +121,7 @@
           drawCubePath(deadPreview.cubePath);
           drawDeadSegmentSelectionOverlay(deadPreview);
           drawCommandPreview(deadPreview);
+          if (!simulationAnimation) drawCubeHeadingMarkers(deadPreview.cubePath);
         } else {
           drawDeadSegmentSelectionOverlay(null);
           drawCommands(animatedCommands);
@@ -438,11 +439,16 @@
         finitePoint(command.x, command.y);
       if (!startCube) return;
       const progress = Number.isFinite(command.previewProgress) ? Math.max(0, Math.min(1, command.previewProgress)) : 1;
-      const distanceMm = deadLineMotionDistanceMm(command, config) * progress;
-      const endCube = {
-        x: startCube.x + Math.cos(degToRad(theta)) * distanceMm,
-        y: startCube.y + Math.sin(degToRad(theta)) * distanceMm,
-      };
+      const targetCube = finitePoint(command.x, command.y);
+      const endCube = targetCube
+        ? {
+            x: startCube.x + (targetCube.x - startCube.x) * progress,
+            y: startCube.y + (targetCube.y - startCube.y) * progress,
+          }
+        : {
+            x: startCube.x + Math.cos(degToRad(theta)) * deadLineMotionDistanceMm(command, config) * progress,
+            y: startCube.y + Math.sin(degToRad(theta)) * deadLineMotionDistanceMm(command, config) * progress,
+          };
       const startPose = { ...startCube, theta: command.startTheta ?? state.currentTheta ?? theta };
       const endPose = { ...endCube, theta };
       appendCubePreviewPoint(state, startPose);
@@ -538,6 +544,54 @@
       drawCubeLabel(displayPoints[0], "START", COLORS.cubeStart, -1);
       drawCubePose(displayPoints[displayPoints.length - 1], COLORS.cubeEnd, 0.95, true);
       drawCubeLabel(displayPoints[displayPoints.length - 1], "END", COLORS.cubeEnd, 1);
+    }
+
+    function drawCubeHeadingMarkers(points) {
+      if (!points.length) return;
+      const stride = Math.max(1, Math.ceil(points.length / 18));
+      for (let i = 0; i < points.length; i += stride) {
+        drawOffsetHeadingMarker(points[i], "rgba(124, 58, 237, 0.72)");
+      }
+      drawOffsetHeadingMarker(points[0], COLORS.cubeStart);
+      drawOffsetHeadingMarker(points[points.length - 1], COLORS.cubeEnd);
+    }
+
+    function drawOffsetHeadingMarker(pose, color) {
+      const dpr = root.devicePixelRatio || 1;
+      const center = matToCanvas(pose);
+      const theta = degToRad(pose.theta || 0);
+      const offset = 18 * dpr;
+      const length = 16 * dpr;
+      const base = {
+        x: center.x + Math.cos(theta + Math.PI / 2) * offset,
+        y: center.y + Math.sin(theta + Math.PI / 2) * offset,
+      };
+      const tip = {
+        x: base.x + Math.cos(theta) * length,
+        y: base.y + Math.sin(theta) * length,
+      };
+      const wing = 5 * dpr;
+      ctx.save();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = "rgba(255, 253, 248, 0.92)";
+      ctx.lineWidth = 5 * dpr;
+      drawHeadingMarkerPath(base, tip, theta, wing);
+      ctx.stroke();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2 * dpr;
+      drawHeadingMarkerPath(base, tip, theta, wing);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawHeadingMarkerPath(base, tip, theta, wing) {
+      ctx.beginPath();
+      ctx.moveTo(base.x, base.y);
+      ctx.lineTo(tip.x, tip.y);
+      ctx.lineTo(tip.x - Math.cos(theta - Math.PI / 5) * wing, tip.y - Math.sin(theta - Math.PI / 5) * wing);
+      ctx.moveTo(tip.x, tip.y);
+      ctx.lineTo(tip.x - Math.cos(theta + Math.PI / 5) * wing, tip.y - Math.sin(theta + Math.PI / 5) * wing);
     }
 
     function drawCubePose(pose, color, alpha = 1, filled = false) {

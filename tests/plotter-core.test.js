@@ -7,9 +7,22 @@ const coderSample = require("../samples/json/coder.json");
 const dojoSample = require("../samples/json/dojo.json");
 const keroppiOutlineSample = require("../samples/json/keroppi-outline.json");
 const stackChanSample = require("../samples/json/stack-chan.json");
+const starSample = require("../samples/json/star.json");
 
 function makeStroke(points) {
   return { raw: points.map(([x, y]) => ({ x, y })) };
+}
+
+function boundsOfPoints(points) {
+  return points.reduce(
+    (bounds, point) => ({
+      minX: Math.min(bounds.minX, point.x),
+      maxX: Math.max(bounds.maxX, point.x),
+      minY: Math.min(bounds.minY, point.y),
+      maxY: Math.max(bounds.maxY, point.y),
+    }),
+    { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity },
+  );
 }
 
 function simulate(stroke, config = {}) {
@@ -642,6 +655,56 @@ test("stack-chan sample uses a wider raised inner rectangle", () => {
   assert.deepEqual(innerRectangle[0].end, { x: 316, y: 194 });
   assert.deepEqual(innerRectangle[2].start, { x: 316, y: 278 });
   assert.deepEqual(innerRectangle[2].end, { x: 184, y: 278 });
+});
+
+test("star sample dead reckoning cube path stays inside the A3 preview area", () => {
+  const config = core.withDefaults();
+  const result = core.createDeadReckoningSimulation({ strokes: starSample.strokes, config });
+  const centerX = (config.mat?.minX ?? 98) + ((config.mat?.maxX ?? 402) - (config.mat?.minX ?? 98)) / 2;
+  const centerY = (config.mat?.minY ?? 142) + ((config.mat?.maxY ?? 358) - (config.mat?.minY ?? 142)) / 2;
+  const halfW = 420 / 2;
+  const halfH = 297 / 2;
+  const cubeHalfSizeMm = 16;
+  const safe = {
+    minX: centerX - halfW + cubeHalfSizeMm,
+    maxX: centerX + halfW - cubeHalfSizeMm,
+    minY: centerY - halfH + cubeHalfSizeMm,
+    maxY: centerY + halfH - cubeHalfSizeMm,
+  };
+
+  assert.ok(result.cubePath.length > 0);
+  for (const point of result.cubePath) {
+    assert.ok(point.x >= safe.minX && point.x <= safe.maxX, `cube x ${point.x} is outside ${safe.minX}..${safe.maxX}`);
+    assert.ok(point.y >= safe.minY && point.y <= safe.maxY, `cube y ${point.y} is outside ${safe.minY}..${safe.maxY}`);
+  }
+});
+
+test("star sample drawing stays inside the minimum A3 safe drawing area", () => {
+  const config = core.withDefaults({ safeScale: 0.5 });
+  const result = core.createDeadReckoningSimulation({ strokes: starSample.strokes, config });
+  const centerX = (config.mat?.minX ?? 98) + ((config.mat?.maxX ?? 402) - (config.mat?.minX ?? 98)) / 2;
+  const centerY = (config.mat?.minY ?? 142) + ((config.mat?.maxY ?? 358) - (config.mat?.minY ?? 142)) / 2;
+  const safe = {
+    minX: centerX - (420 * config.safeScale) / 2,
+    maxX: centerX + (420 * config.safeScale) / 2,
+    minY: centerY - (297 * config.safeScale) / 2,
+    maxY: centerY + (297 * config.safeScale) / 2,
+  };
+  const drawPoints = result.segments.filter((segment) => segment.kind === "draw").flatMap((segment) => [segment.start, segment.end]);
+
+  for (const point of drawPoints) {
+    assert.ok(point.x >= safe.minX && point.x <= safe.maxX, `draw x ${point.x} is outside ${safe.minX}..${safe.maxX}`);
+    assert.ok(point.y >= safe.minY && point.y <= safe.maxY, `draw y ${point.y} is outside ${safe.minY}..${safe.maxY}`);
+  }
+});
+
+test("star sample dead reckoning draw segments preserve the sample size", () => {
+  const result = core.createDeadReckoningSimulation({ strokes: starSample.strokes, config: core.withDefaults() });
+  const rawBounds = boundsOfPoints(starSample.strokes.flatMap((stroke) => stroke.raw));
+  const drawBounds = boundsOfPoints(result.segments.filter((segment) => segment.kind === "draw").flatMap((segment) => [segment.start, segment.end]));
+
+  assert.equal(result.segments.filter((segment) => segment.kind === "draw").length, 10);
+  assert.deepEqual(drawBounds, rawBounds);
 });
 
 test("coder and dojo samples use straight segments for lowercase o", () => {

@@ -1117,7 +1117,7 @@ async function loadSelectedSample() {
     log("サンプル図形を選択してください。");
     return;
   }
-  const response = await fetch(src);
+  const response = await fetch(src, { cache: "no-store" });
   if (!response.ok) throw new Error(`Sample load failed: ${response.status} ${response.statusText}`);
   const payload = await response.json();
   importDrawingPayload(payload, `サンプルを読み込みました: ${els.sampleSelect.options[els.sampleSelect.selectedIndex].text}`);

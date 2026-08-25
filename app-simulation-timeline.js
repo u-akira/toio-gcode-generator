@@ -143,10 +143,14 @@
         const theta = normalizeDegrees((command.startTheta ?? command.theta ?? 0) + command.sweepAngle * t);
         const cubePoint = pointOnCircle(command.center, command.radius, angle);
         const penPoint = cubeToPen(cubePoint, theta, config);
-        const previewEnd = (points) => {
+        const previewEnd = (points, currentPoint) => {
           if (!Array.isArray(points)) return points;
-          const count = Math.max(1, Math.floor((points.length - 1) * t));
-          return points.slice(0, count + 1);
+          if (!points.length || !currentPoint) return points;
+          const lastCompletedIndex = Math.floor((points.length - 1) * t);
+          const result = points.slice(0, lastCompletedIndex + 1);
+          const last = result[result.length - 1];
+          if (!last || Math.hypot(last.x - currentPoint.x, last.y - currentPoint.y) >= 0.01) result.push(currentPoint);
+          return result;
         };
         return {
           ...command,
@@ -155,8 +159,8 @@
           theta,
           penX: penPoint.x,
           penY: penPoint.y,
-          cubePreviewPoints: previewEnd(command.cubePreviewPoints),
-          penPreviewPoints: previewEnd(command.penPreviewPoints),
+          cubePreviewPoints: previewEnd(command.cubePreviewPoints, { ...cubePoint, theta }),
+          penPreviewPoints: previewEnd(command.penPreviewPoints, penPoint),
         };
       }
       if (command.type === "motor" && command.x != null && command.y != null && item.fromCubePose) {
@@ -168,10 +172,9 @@
           theta: item.fromCubePose.theta,
         };
         const theta = command.theta ?? fromCube.theta;
-        const distanceMm = deadLineMotionDistanceMm(command, config) * t;
         const cubePoint = {
-          x: fromCube.x + Math.cos((theta * Math.PI) / 180) * distanceMm,
-          y: fromCube.y + Math.sin((theta * Math.PI) / 180) * distanceMm,
+          x: fromCube.x + (command.x - fromCube.x) * t,
+          y: fromCube.y + (command.y - fromCube.y) * t,
         };
         const penPoint = cubeToPen(cubePoint, theta, config);
         return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y, previewProgress: t };

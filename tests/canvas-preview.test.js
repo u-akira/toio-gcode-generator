@@ -95,3 +95,30 @@ test("dead command preview keeps drawn segments after pen up", () => {
   assert.equal(Math.round(preview.penDownSegments[0][0].x), 10);
   assert.equal(Math.round(preview.penDownSegments[0].at(-1).x), 67);
 });
+
+test("dead command preview uses command endpoints for straight draw lines", () => {
+  const config = core.withDefaults({ drawSpeed: 20, penOffsetX: 0, penOffsetY: 0 });
+  const renderer = loadCanvasRenderer({ config });
+  const preview = renderer.__test.buildDeadCommandPreview([
+    { type: "pen", state: "down", penX: 10, penY: 20 },
+    {
+      type: "motor",
+      kind: "draw",
+      geometry: "line",
+      speed: 20,
+      fromX: 10,
+      fromY: 20,
+      x: 90,
+      y: 20,
+      theta: 0,
+      durationMs: 100,
+      penX: 90,
+      penY: 20,
+    },
+    { type: "pen", state: "up", penX: 90, penY: 20 },
+  ]);
+
+  assert.equal(preview.penDownSegments.length, 1);
+  assert.equal(preview.penDownSegments[0].at(-1).x, 90);
+  assert.equal(preview.finalCubePose.x, 90);
+});

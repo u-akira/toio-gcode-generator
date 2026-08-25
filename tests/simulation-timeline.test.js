@@ -106,7 +106,84 @@ test("dead reckoning motor animation starts from the previous command pose", () 
   assert.equal(frame.x, 10);
   assert.equal(frame.y, 20);
   assert.equal(Math.round(midFrame.x), 10);
-  assert.equal(Math.round(midFrame.y), 55);
+  assert.equal(Math.round(midFrame.y), 70);
+});
+
+test("dead reckoning motor animation interpolates to the command endpoint", () => {
+  const config = core.withDefaults({ penOffsetX: 0, penOffsetY: 0 });
+  const commands = [
+    {
+      type: "turn",
+      x: 0,
+      y: 0,
+      theta: 0,
+      durationMs: 100,
+      penX: 0,
+      penY: 0,
+    },
+    {
+      type: "motor",
+      kind: "draw",
+      geometry: "line",
+      speed: 20,
+      fromX: 0,
+      fromY: 0,
+      x: 80,
+      y: 0,
+      theta: 0,
+      penX: 80,
+      penY: 0,
+      durationMs: 3000,
+    },
+  ];
+  const tools = loadTimelineTools({ commands, config, mode: "dead" });
+  const timeline = tools.buildSimulationTimeline(commands);
+  const item = timeline.items[1];
+  const frame = tools.commandsAtElapsed(timeline, item.startMs + 1500).at(-1);
+
+  assert.equal(frame.x, 40);
+  assert.equal(frame.y, 0);
+  assert.equal(frame.penX, 40);
+  assert.equal(frame.penY, 0);
+});
+
+test("dead reckoning arc animation appends the exact current arc point", () => {
+  const config = core.withDefaults({ penOffsetX: 0, penOffsetY: 0 });
+  const commands = [
+    {
+      type: "motor",
+      kind: "draw",
+      geometry: "arc",
+      center: { x: 0, y: 0 },
+      radius: 100,
+      startAngle: 0,
+      sweepAngle: 90,
+      startTheta: 90,
+      theta: 180,
+      durationMs: 1000,
+      cubePreviewPoints: [
+        { x: 100, y: 0, theta: 90 },
+        { x: 0, y: 100, theta: 180 },
+      ],
+      penPreviewPoints: [
+        { x: 100, y: 0 },
+        { x: 0, y: 100 },
+      ],
+    },
+  ];
+  const tools = loadTimelineTools({ commands, config, mode: "dead" });
+  const timeline = tools.buildSimulationTimeline(commands);
+  const frame = tools.commandsAtElapsed(timeline, 500).at(-1);
+
+  assert.equal(frame.cubePreviewPoints.length, 2);
+  assert.equal(frame.penPreviewPoints.length, 2);
+  assert.ok(Math.abs(frame.cubePreviewPoints.at(-1).x - 70.71) < 0.02);
+  assert.ok(Math.abs(frame.cubePreviewPoints.at(-1).y - 70.71) < 0.02);
+  assert.equal(frame.cubePreviewPoints.at(-1).x, frame.x);
+  assert.equal(frame.cubePreviewPoints.at(-1).y, frame.y);
+  assert.equal(frame.cubePreviewPoints.at(-1).theta, frame.theta);
+  assert.equal(frame.penPreviewPoints.at(-1).x, frame.penX);
+  assert.equal(frame.penPreviewPoints.at(-1).y, frame.penY);
 });
 
 test("dead reckoning wait commands are playable while pen remains down", () => {
