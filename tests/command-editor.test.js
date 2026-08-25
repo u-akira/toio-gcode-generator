@@ -4,7 +4,16 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-function loadCommandEditor({ commands, overrides, formatCommand = () => "", outputEl = null, getActiveCommandIndex = () => -1 }) {
+function loadCommandEditor({
+  commands,
+  overrides,
+  formatCommand = () => "",
+  outputEl = null,
+  getActiveCommandIndex = () => -1,
+  getConfig = () => ({}),
+  penToCube = (point) => point,
+  cubeToPen = (point) => point,
+}) {
   const context = { window: {}, Math };
   vm.createContext(context);
   const source = fs.readFileSync(path.join(__dirname, "..", "app-command-editor.js"), "utf8");
@@ -13,7 +22,7 @@ function loadCommandEditor({ commands, overrides, formatCommand = () => "", outp
     outputEl,
     getSimulation: () => ({ commands }),
     getSimulationValid: () => true,
-    getConfig: () => ({}),
+    getConfig,
     getCommandOverrides: () => overrides,
     isDeadMode: () => true,
     formatDeadToioCommand: formatCommand,
@@ -25,7 +34,9 @@ function loadCommandEditor({ commands, overrides, formatCommand = () => "", outp
     minTurnDurationMs: 150,
     turnWheelSpeeds: () => ({ left: 0, right: 0 }),
     turnMsPer90: () => 660,
-    cubeToPen: () => ({ x: 0, y: 0 }),
+    penToCube,
+    cubeToPen,
+    degToRad: (degrees) => degrees * Math.PI / 180,
     normalizeDegrees: (degrees) => ((degrees % 360) + 360) % 360,
     syncSimulationControls: () => {},
     focusCommand: () => true,
@@ -50,6 +61,69 @@ test("wait command overrides are captured and applied for JSON round trips", () 
   commands[1].ms = 1000;
   editor.applyCommandOverrides();
   assert.equal(commands[1].ms, 1500);
+});
+
+test("straight motor duration override wins over captured distance scale", () => {
+  const overrides = new Map();
+  const editedCommands = [
+    {
+      type: "motor",
+      kind: "draw",
+      geometry: "line",
+      segmentId: "seg-0",
+      speed: 20,
+      durationMs: 1000,
+      distanceScale: 1000 / 3000,
+      fromX: 0,
+      fromY: 0,
+      x: 100,
+      y: 0,
+      theta: 0,
+      baseMotion: { speed: 20, durationMs: 2550, fromX: 0, fromY: 0, x: 255, y: 0, theta: 0 },
+    },
+  ];
+  loadCommandEditor({ commands: editedCommands, overrides }).captureCommandOverrides();
+
+  const regeneratedCommands = [
+    {
+      type: "motor",
+      kind: "draw",
+      geometry: "line",
+      segmentId: "seg-0",
+      speed: 20,
+      durationMs: 100,
+      fromX: 0,
+      fromY: 0,
+      x: 10,
+      y: 0,
+      theta: 0,
+    },
+  ];
+  loadCommandEditor({ commands: regeneratedCommands, overrides }).applyCommandOverrides();
+
+  assert.equal(regeneratedCommands[0].durationMs, 1000);
+});
+
+test("dead line command reflow starts following travel at the edited endpoint", () => {
+  const commands = [
+    { type: "pen", state: "down", penX: 0, penY: 0 },
+    { type: "motor", kind: "draw", geometry: "line", segmentId: "seg-0", speed: 20, durationMs: 1000, fromX: 0, fromY: 0, x: 140, y: 0, theta: 0 },
+    { type: "pen", state: "up", penX: 140, penY: 0 },
+    { type: "turn", role: "turn-to-travel", segmentId: "seg-1", angle: 45, durationMs: 500, x: 140, y: 0, theta: 45, penX: 140, penY: 0 },
+    { type: "motor", kind: "travel", geometry: "line", segmentId: "seg-1", speed: 20, durationMs: 1000, fromX: 140, fromY: 0, x: 200, y: 60, theta: 45 },
+  ];
+  const editor = loadCommandEditor({
+    commands,
+    overrides: new Map(),
+    getConfig: () => ({ drawSpeed: 20, travelSpeed: 20, deadMmPerSecAtTravelSpeed: 70 }),
+  });
+
+  editor.reflowDeadLineCommandPath();
+
+  assert.equal(commands[1].penX, 57);
+  assert.equal(commands[2].penX, 57);
+  assert.equal(commands[3].x, 57);
+  assert.equal(commands[4].fromX, 57);
 });
 
 test("commands without inputs render non-clickable step badges", () => {

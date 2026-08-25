@@ -22,12 +22,28 @@
       isDeadMode,
       safeBounds,
       nativeToMatPose,
+      penToCube,
+      cubeToPen,
       distance,
       degToRad,
       primitivePreviewPoints,
     } = deps;
 
+    const A3_PREVIEW_WIDTH_MM = 420;
+    const A3_PREVIEW_HEIGHT_MM = 297;
+    const DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED = 57;
+
     function getDrawingBounds() {
+      if (isDeadMode()) {
+        const centerX = (MAT.minX + MAT.maxX) / 2;
+        const centerY = (MAT.minY + MAT.maxY) / 2;
+        return {
+          minX: centerX - A3_PREVIEW_WIDTH_MM / 2,
+          maxX: centerX + A3_PREVIEW_WIDTH_MM / 2,
+          minY: centerY - A3_PREVIEW_HEIGHT_MM / 2,
+          maxY: centerY + A3_PREVIEW_HEIGHT_MM / 2,
+        };
+      }
       return MAT;
     }
 
@@ -99,11 +115,19 @@
       if (activeStroke) drawStroke(activeStroke.raw, COLORS.drawing, 2.2);
       if (simulation) {
         const animatedCommands = getAnimatedCommands();
-        drawCommands(animatedCommands);
-        drawDeadSegmentSelectionOverlay();
-        if (getSimulationAnimation()) {
-          drawAnimationCursor(animatedCommands);
+        const deadPreview = isDeadMode() ? buildDeadCommandPreview(animatedCommands) : null;
+        const simulationAnimation = getSimulationAnimation();
+        if (deadPreview) {
+          drawCubePath(deadPreview.cubePath);
+          drawDeadSegmentSelectionOverlay(deadPreview);
+          drawCommandPreview(deadPreview);
         } else {
+          drawDeadSegmentSelectionOverlay(null);
+          drawCommands(animatedCommands);
+        }
+        if (simulationAnimation) {
+          deadPreview ? drawAnimationCursorFromPreview(deadPreview) : drawAnimationCursor(animatedCommands);
+        } else if (!deadPreview) {
           drawCubePath(simulation.cubePath);
         }
       }
@@ -135,18 +159,18 @@
       return result;
     }
 
-    function drawDeadSegmentSelectionOverlay() {
+    function drawDeadSegmentSelectionOverlay(deadPreview) {
       const segments = getDeadSegments();
       if (!isDeadMode() || !segments.length) return;
       const selectedId = getSelectedDeadSegmentId();
       for (const segment of segments) {
-        drawSegmentHighlight(segment, segment.id === selectedId);
+        drawSegmentHighlight(segment, segment.id === selectedId, deadPreview);
       }
     }
 
-    function drawSegmentHighlight(segment, selected) {
+    function drawSegmentHighlight(segment, selected, deadPreview) {
       const dpr = root.devicePixelRatio || 1;
-      const points = segmentPenPoints(segment).map(matToCanvas);
+      const points = segmentPenPoints(segment, deadPreview).map(matToCanvas);
       if (points.length < 2) return;
       ctx.save();
       ctx.lineCap = "round";
@@ -161,9 +185,27 @@
       ctx.restore();
     }
 
-    function segmentPenPoints(segment) {
+    function segmentPenPoints(segment, deadPreview) {
+      const previewPath = deadPreview?.segmentPenPaths?.get(segment.id);
+      if (previewPath?.length) return previewPath;
       if (segment.geometry === "arc" && Array.isArray(segment.penPreviewPoints)) return segment.penPreviewPoints;
+      if (isDeadMode() && segment.kind === "draw" && segment.geometry === "line") return deadCommandLinePoints(currentSegmentDrawCommand(segment)) || [segment.start, segment.end].filter(Boolean);
       return [segment.start, segment.end].filter(Boolean);
+    }
+
+    function currentSegmentDrawCommand(segment) {
+      return getSimulation()?.commands?.find(
+        (command) => command.type === "motor" && command.kind === "draw" && command.geometry === "line" && command.segmentId === segment.id,
+      );
+    }
+
+    function deadCommandLinePoints(command) {
+      if (!command || command.fromX == null || command.fromY == null || command.penX == null) return null;
+      const theta = command.startTheta ?? command.theta ?? 0;
+      return [
+        cubeToPen({ x: command.fromX, y: command.fromY }, theta, getConfig()),
+        { x: command.penX, y: command.penY },
+      ];
     }
 
     function drawMat(playMatImageLoaded) {
@@ -181,7 +223,7 @@
       ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
 
       let label = "A3 simple play mat #01 (Position ID)";
-      const safe = safeBounds();
+      const safe = getSafeDrawingBounds();
       const s1 = matToCanvas({ x: safe.minX, y: safe.minY });
       const s2 = matToCanvas({ x: safe.maxX, y: safe.maxY });
       ctx.setLineDash([8, 7]);
@@ -198,6 +240,22 @@
       ctx.font = `${12 * (root.devicePixelRatio || 1)}px system-ui`;
       ctx.fillText(label, p1.x + 10, p1.y + 18);
       ctx.restore();
+    }
+
+    function getSafeDrawingBounds() {
+      if (!isDeadMode()) return safeBounds();
+      const bounds = getDrawingBounds();
+      const scale = Math.max(0.5, Math.min(1, Number(getConfig().safeScale) || 0.75));
+      const centerX = (bounds.minX + bounds.maxX) / 2;
+      const centerY = (bounds.minY + bounds.maxY) / 2;
+      const halfW = ((bounds.maxX - bounds.minX) * scale) / 2;
+      const halfH = ((bounds.maxY - bounds.minY) * scale) / 2;
+      return {
+        minX: centerX - halfW,
+        maxX: centerX + halfW,
+        minY: centerY - halfH,
+        maxY: centerY + halfH,
+      };
     }
 
     function drawStroke(points, color, width, dash = null) {
@@ -268,17 +326,218 @@
       for (const event of events) drawPenEvent(event);
     }
 
+    function drawCommandPreview(preview) {
+      for (const segment of preview.penUpSegments) drawStroke(segment, "rgba(107, 114, 128, 0.42)", 1.1, [5, 5]);
+      for (const segment of preview.penDownSegments) drawStroke(segment, COLORS.penSimulation, 3.2);
+      for (const event of preview.events) drawPenEvent(event);
+    }
+
+    function buildDeadCommandPreview(commands) {
+      const config = getConfig();
+      const state = {
+        penDownSegments: [],
+        penUpSegments: [],
+        events: [],
+        cubePath: [],
+        segmentPenPaths: new Map(),
+        currentCube: null,
+        currentPen: null,
+        currentTheta: null,
+        penState: "up",
+        downPoints: [],
+        upPoints: [],
+      };
+
+      for (const command of commands || []) {
+        if (command.type === "pen") {
+          const eventPoint = commandPointOrCurrentPen(command, state);
+          flushPenPreviewSegment(state, state.penState === "down");
+          if (eventPoint) {
+            state.events.push({ ...eventPoint, state: command.state });
+            state.currentPen = eventPoint;
+          }
+          if (command.state === "down") state.downPoints = eventPoint ? [eventPoint] : [];
+          if (command.state === "up") state.upPoints = eventPoint ? [eventPoint] : [];
+          state.penState = command.state;
+          continue;
+        }
+
+        if (command.type === "turn") {
+          replayTurnCommand(command, state, config);
+          continue;
+        }
+
+        if (command.type === "motor") {
+          replayMotorCommand(command, state, config);
+          continue;
+        }
+
+        if (command.type === "move" || command.type === "rotate") {
+          replayPositionCommand(command, state);
+        }
+      }
+
+      flushPenPreviewSegment(state, state.penState === "down");
+      return {
+        penDownSegments: state.penDownSegments,
+        penUpSegments: state.penUpSegments,
+        events: state.events,
+        cubePath: state.cubePath,
+        segmentPenPaths: state.segmentPenPaths,
+        finalPenPoint: state.currentPen,
+        finalCubePose: state.currentCube && { ...state.currentCube, theta: state.currentTheta || 0 },
+        penState: state.penState,
+      };
+    }
+
+    function commandPointOrCurrentPen(command, state) {
+      if (state.currentPen) return { ...state.currentPen };
+      if (command.penX != null && command.penY != null) return { x: command.penX, y: command.penY };
+      return null;
+    }
+
+    function flushPenPreviewSegment(state, down) {
+      if (down && state.downPoints.length > 1) state.penDownSegments.push(state.downPoints);
+      if (!down && state.upPoints.length > 1) state.penUpSegments.push(state.upPoints);
+      if (down) state.downPoints = [];
+      if (!down) state.upPoints = [];
+    }
+
+    function replayTurnCommand(command, state, config) {
+      const theta = command.theta ?? state.currentTheta ?? 0;
+      if (!state.currentCube && command.x != null && command.y != null) {
+        state.currentCube = { x: command.x, y: command.y };
+      }
+      if (!state.currentCube) {
+        state.currentTheta = theta;
+        return;
+      }
+      state.currentTheta = theta;
+      const cubePose = { ...state.currentCube, theta };
+      state.cubePath.push(cubePose);
+      const penPoint = cubeToPen(state.currentCube, theta, config);
+      if (state.penState === "down") {
+        appendPenPreviewPoint(state, penPoint, command.segmentId);
+      } else {
+        resetPenPreviewAnchor(state, penPoint);
+      }
+      state.currentPen = penPoint;
+    }
+
+    function replayMotorCommand(command, state, config) {
+      if (command.geometry === "arc" && Array.isArray(command.cubePreviewPoints) && Array.isArray(command.penPreviewPoints)) {
+        replayPreviewPointArrays(command, state);
+        return;
+      }
+
+      const theta = command.theta ?? state.currentTheta ?? 0;
+      const startCube =
+        state.currentCube ||
+        finitePoint(command.fromX, command.fromY) ||
+        (state.currentPen ? penToCube(state.currentPen, theta, config) : null) ||
+        finitePoint(command.x, command.y);
+      if (!startCube) return;
+      const progress = Number.isFinite(command.previewProgress) ? Math.max(0, Math.min(1, command.previewProgress)) : 1;
+      const distanceMm = deadLineMotionDistanceMm(command, config) * progress;
+      const endCube = {
+        x: startCube.x + Math.cos(degToRad(theta)) * distanceMm,
+        y: startCube.y + Math.sin(degToRad(theta)) * distanceMm,
+      };
+      const startPose = { ...startCube, theta: command.startTheta ?? state.currentTheta ?? theta };
+      const endPose = { ...endCube, theta };
+      appendCubePreviewPoint(state, startPose);
+      appendCubePreviewPoint(state, endPose);
+
+      const startPen = cubeToPen(startCube, startPose.theta, config);
+      const endPen = cubeToPen(endCube, theta, config);
+      appendPenPreviewPoint(state, startPen, command.segmentId);
+      appendPenPreviewPoint(state, endPen, command.segmentId);
+      state.currentCube = endCube;
+      state.currentTheta = theta;
+      state.currentPen = endPen;
+    }
+
+    function replayPreviewPointArrays(command, state) {
+      for (const point of command.cubePreviewPoints) appendCubePreviewPoint(state, point);
+      for (const point of command.penPreviewPoints) appendPenPreviewPoint(state, point, command.segmentId);
+      const lastCube = command.cubePreviewPoints[command.cubePreviewPoints.length - 1];
+      const lastPen = command.penPreviewPoints[command.penPreviewPoints.length - 1];
+      if (lastCube) {
+        state.currentCube = { x: lastCube.x, y: lastCube.y };
+        state.currentTheta = lastCube.theta ?? command.theta ?? state.currentTheta;
+      }
+      if (lastPen) state.currentPen = { x: lastPen.x, y: lastPen.y };
+    }
+
+    function replayPositionCommand(command, state) {
+      if (command.x != null && command.y != null) {
+        appendCubePreviewPoint(state, { x: command.x, y: command.y, theta: command.theta || 0 });
+        state.currentCube = { x: command.x, y: command.y };
+        state.currentTheta = command.theta ?? state.currentTheta;
+      }
+      if (command.penX != null && command.penY != null) {
+        const point = { x: command.penX, y: command.penY };
+        appendPenPreviewPoint(state, point, command.segmentId);
+        state.currentPen = point;
+      }
+    }
+
+    function appendCubePreviewPoint(state, point) {
+      const previous = state.cubePath[state.cubePath.length - 1];
+      if (previous && Math.hypot(previous.x - point.x, previous.y - point.y) < 0.01 && Math.abs((previous.theta || 0) - (point.theta || 0)) < 0.01) return;
+      state.cubePath.push(point);
+    }
+
+    function appendPenPreviewPoint(state, point, segmentId) {
+      const target = state.penState === "down" ? state.downPoints : state.upPoints;
+      const previous = target[target.length - 1];
+      if (!previous || Math.hypot(previous.x - point.x, previous.y - point.y) >= 0.01) target.push(point);
+      if (segmentId) {
+        const segmentPath = state.segmentPenPaths.get(segmentId) || [];
+        const lastSegmentPoint = segmentPath[segmentPath.length - 1];
+        if (!lastSegmentPoint || Math.hypot(lastSegmentPoint.x - point.x, lastSegmentPoint.y - point.y) >= 0.01) segmentPath.push(point);
+        state.segmentPenPaths.set(segmentId, segmentPath);
+      }
+    }
+
+    function resetPenPreviewAnchor(state, point) {
+      if (state.penState === "down") {
+        state.downPoints = [point];
+      } else {
+        state.upPoints = [point];
+      }
+    }
+
+    function finitePoint(x, y) {
+      return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+    }
+
+    function deadLineMotionDistanceMm(command, config) {
+      if (command.kind !== "draw" && command.kind !== "travel" && command.fromX != null && command.fromY != null && command.x != null && command.y != null) {
+        return Math.hypot(command.x - command.fromX, command.y - command.fromY);
+      }
+      const draw = command.kind === "draw";
+      const baseSpeed = Math.max(1, Math.abs(Number(draw ? config.drawSpeed : config.travelSpeed) || 1));
+      const mmPerSec = draw
+        ? DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED
+        : Math.max(1, Number(config.deadMmPerSecAtTravelSpeed) || 1);
+      const speed = command.speed ?? (((Number(command.leftSpeed) || 0) + (Number(command.rightSpeed) || 0)) / 2);
+      return mmPerSec * ((Number(speed) || 0) / baseSpeed) * ((command.durationMs || 0) / 1000);
+    }
+
     function drawCubePath(points) {
       if (!points.length) return;
-      drawStroke(points, COLORS.cubePath, 1.4, [8, 7]);
-      const stride = Math.max(1, Math.ceil(points.length / 18));
-      for (let i = 0; i < points.length; i += stride) {
-        drawCubePose(points[i], COLORS.cubeGhost, 0.36, false);
+      const displayPoints = points;
+      if (!displayPoints.length) return;
+      drawStroke(displayPoints, "rgba(37, 99, 235, 0.38)", 1.1, [8, 7]);
+      const stride = Math.max(1, Math.ceil(displayPoints.length / 18));
+      for (let i = 0; i < displayPoints.length; i += stride) {
+        drawCubePose(displayPoints[i], COLORS.cubeGhost, 0.22, false);
       }
-      drawCubePose(points[0], COLORS.cubeStart, 0.95, true);
-      drawCubeLabel(points[0], "START", COLORS.cubeStart, -1);
-      drawCubePose(points[points.length - 1], COLORS.cubeEnd, 0.95, true);
-      drawCubeLabel(points[points.length - 1], "END", COLORS.cubeEnd, 1);
+      drawCubePose(displayPoints[0], COLORS.cubeStart, 0.95, true);
+      drawCubeLabel(displayPoints[0], "START", COLORS.cubeStart, -1);
+      drawCubePose(displayPoints[displayPoints.length - 1], COLORS.cubeEnd, 0.95, true);
+      drawCubeLabel(displayPoints[displayPoints.length - 1], "END", COLORS.cubeEnd, 1);
     }
 
     function drawCubePose(pose, color, alpha = 1, filled = false) {
@@ -376,9 +635,14 @@
 
       items.forEach(([label, color, kind], index) => {
         const itemY = y + 12 * dpr + index * lineH;
-        ctx.strokeStyle = color;
-        ctx.fillStyle = color;
-        ctx.lineWidth = 2 * dpr;
+        const displayColor = color === COLORS.penTravel
+          ? "rgba(107, 114, 128, 0.42)"
+          : color === COLORS.cubePath
+            ? "rgba(37, 99, 235, 0.38)"
+            : color;
+        ctx.strokeStyle = displayColor;
+        ctx.fillStyle = displayColor;
+        ctx.lineWidth = (kind === "solid" ? 3 : 2) * dpr;
         if (kind === "dash") ctx.setLineDash([6 * dpr, 5 * dpr]);
         if (kind === "event") {
           ctx.setLineDash([]);
@@ -418,6 +682,25 @@
       ctx.fill();
       ctx.stroke();
       drawPenStateBadge(canvasPoint, penState);
+      ctx.restore();
+    }
+
+    function drawAnimationCursorFromPreview(preview) {
+      const pose = preview.finalCubePose;
+      const point = preview.finalPenPoint;
+      if (pose) drawCubePose(pose, COLORS.liveCube, 1, true);
+      if (!point) return;
+      const dpr = root.devicePixelRatio || 1;
+      const canvasPoint = matToCanvas(point);
+      ctx.save();
+      ctx.fillStyle = preview.penState === "down" ? COLORS.penDownEvent : COLORS.penUpEvent;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2 * dpr;
+      ctx.beginPath();
+      ctx.arc(canvasPoint.x, canvasPoint.y, 7 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      drawPenStateBadge(canvasPoint, preview.penState);
       ctx.restore();
     }
 
@@ -485,8 +768,9 @@
       };
       const threshold = 10 * dpr;
       let best = null;
+      const deadPreview = buildDeadCommandPreview(getAnimatedCommands());
       for (const segment of getDeadSegments()) {
-        const d = distanceToCanvasSegmentPath(point, segmentPenPoints(segment).map(matToCanvas));
+        const d = distanceToCanvasSegmentPath(point, segmentPenPoints(segment, deadPreview).map(matToCanvas));
         if (d <= threshold && (!best || d < best.distance)) best = { segment, distance: d };
       }
       return best?.segment || null;
@@ -516,6 +800,9 @@
       canvasToMat,
       draw,
       findClickedDrawSegment,
+      __test: {
+        buildDeadCommandPreview,
+      },
     };
   }
 

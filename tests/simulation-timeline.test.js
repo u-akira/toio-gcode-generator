@@ -66,6 +66,47 @@ test("dead reckoning motor animation uses dead timeline without position turn ap
   assert.equal(frame.x, 100);
   assert.equal(frame.y, 150);
   assert.equal(frame.theta, 0);
+  assert.equal(frame.previewProgress, 0.5);
+});
+
+test("dead reckoning motor animation starts from the previous command pose", () => {
+  const config = core.withDefaults({ penOffsetX: -48, penOffsetY: 0 });
+  const commands = [
+    {
+      type: "turn",
+      x: 10,
+      y: 20,
+      theta: 90,
+      durationMs: 1000,
+      penX: 10,
+      penY: 20,
+    },
+    {
+      type: "motor",
+      kind: "travel",
+      geometry: "line",
+      speed: 20,
+      fromX: 200,
+      fromY: 200,
+      x: 10,
+      y: 120,
+      theta: 90,
+      penX: 10,
+      penY: 120,
+      durationMs: 1000,
+    },
+  ];
+  const tools = loadTimelineTools({ commands, config, mode: "dead" });
+  const timeline = tools.buildSimulationTimeline(commands);
+  const travelItem = timeline.items[1];
+  const frame = tools.commandsAtElapsed(timeline, travelItem.startMs).at(-1);
+  const midFrame = tools.commandsAtElapsed(timeline, travelItem.startMs + 500).at(-1);
+
+  assert.equal(frame.type, "motor");
+  assert.equal(frame.x, 10);
+  assert.equal(frame.y, 20);
+  assert.equal(Math.round(midFrame.x), 10);
+  assert.equal(Math.round(midFrame.y), 55);
 });
 
 test("dead reckoning wait commands are playable while pen remains down", () => {

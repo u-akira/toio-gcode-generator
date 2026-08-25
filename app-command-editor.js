@@ -18,7 +18,9 @@
       minTurnDurationMs,
       turnWheelSpeeds,
       turnMsPer90,
+      penToCube,
       cubeToPen,
+      degToRad,
       normalizeDegrees,
       syncSimulationControls,
       focusCommand,
@@ -27,6 +29,7 @@
     } = deps;
 
     let lastScrolledCommandIndex = -1;
+    const DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED = 57;
 
     function captureCommandOverrides() {
       const simulation = getSimulation();
@@ -58,7 +61,7 @@
             ensureMotorBaseline(command);
             if (override.speed != null) command.speed = override.speed;
             if (override.durationMs != null) command.durationMs = override.durationMs;
-            if (override.distanceScale != null) {
+            if (override.distanceScale != null && override.durationMs == null) {
               command.distanceScale = override.distanceScale;
               command.durationMs = roundToMotorDurationMs(Math.max(10, command.baseMotion.durationMs * command.distanceScale));
             } else if (override.durationMs != null) {
@@ -78,6 +81,7 @@
           if (override.ms != null) command.ms = override.ms;
         }
       }
+      reflowDeadLineCommandPath();
     }
 
     function commandOverrideFromCommand(command) {
@@ -174,7 +178,7 @@
       <div class="command-fields">
         ${commandInputTemplate(index, "leftSpeed", "L", command.leftSpeed, 1, -255, 255)}
         ${commandInputTemplate(index, "rightSpeed", "R", command.rightSpeed, 1, -255, 255)}
-        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || 10, 10, 10, 60000)}
+        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || 100, 10, 100, 60000)}
       </div>
     `;
         }
@@ -183,7 +187,7 @@
         return `
       <div class="command-fields">
         ${commandInputTemplate(index, "speed", "speed", motorStraightSpeed(command), 1, -255, 255)}
-        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || 10, 10, 10, 2550)}
+        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || 100, 10, 100, 60000)}
         ${distanceInput}
       </div>
     `;
@@ -194,7 +198,7 @@
       <div class="command-fields">
         ${commandInputTemplate(index, "leftSpeed", "L", speeds.left, 1, -255, 255)}
         ${commandInputTemplate(index, "rightSpeed", "R", speeds.right, 1, -255, 255)}
-        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || 0, 10, 0, 2550)}
+        ${commandInputTemplate(index, "durationMs", "ms", command.durationMs || 100, 10, 100, 60000)}
       </div>
     `;
       }
@@ -301,12 +305,12 @@
       }
       let value = Number(input.value);
       if ((command.type === "turn" || command.type === "motor") && key === "durationMs") {
-        const minMs = command.type === "turn" ? minTurnDurationMs : 10;
-        value = command.type === "motor" && command.geometry === "arc" ? Math.round(Math.max(minMs, value) / 10) * 10 : roundToMotorDurationMs(Math.max(minMs, value));
+        const minMs = command.type === "turn" ? Math.max(100, minTurnDurationMs) : 100;
+        value = roundDurationInputMs(Math.max(minMs, value));
       }
       if (command.type === "motor" && key === "distanceScale") {
         value = clamp(value, 0.1, 2);
-        command.durationMs = roundToMotorDurationMs(Math.max(10, command.baseMotion.durationMs * value));
+        command.durationMs = roundDurationInputMs(Math.max(100, command.baseMotion.durationMs * value));
       }
       command[key] = value;
       if (command.type === "motor" && command.geometry === "arc") {
@@ -322,6 +326,7 @@
         command.manualWheelSpeeds = true;
         updateManualTurnPose(command, index);
       }
+      reflowDeadLineCommandPath();
       const overrideKey = commandOverrideKey(command, index, simulation.commands);
       const override = commandOverrideFromCommand(command);
       if (overrideKey && override) getCommandOverrides().set(overrideKey, override);
@@ -350,23 +355,113 @@
       };
     }
 
+    function roundDurationInputMs(durationMs) {
+      return Math.round(durationMs / 10) * 10;
+    }
+
     function updateStraightMotorPose(command) {
       const config = getConfig();
       const base = command.baseMotion;
       if (!base || base.fromX == null || base.fromY == null || base.x == null || base.y == null) return;
-      const speedScale = (command.speed || 0) / (Math.abs(base.speed || 1) < 1 ? 1 : base.speed);
-      const durationScale = (command.durationMs || 0) / Math.max(1, base.durationMs || 1);
-      const scale = speedScale * durationScale;
+      const dx = base.x - base.fromX;
+      const dy = base.y - base.fromY;
+      const baseDistance = Math.hypot(dx, dy);
+      const scale = command.kind === "draw"
+        ? deadDrawPreviewScale(command, baseDistance)
+        : deadRelativeMotionScale(command, base);
       command.leftSpeed = command.speed;
       command.rightSpeed = command.speed;
       command.fromX = base.fromX;
       command.fromY = base.fromY;
-      command.x = base.fromX + (base.x - base.fromX) * scale;
-      command.y = base.fromY + (base.y - base.fromY) * scale;
+      command.x = base.fromX + dx * scale;
+      command.y = base.fromY + dy * scale;
       command.theta = base.theta;
       const penPoint = cubeToPen({ x: command.x, y: command.y }, command.theta || 0, config);
       command.penX = penPoint.x;
       command.penY = penPoint.y;
+    }
+
+    function reflowDeadLineCommandPath() {
+      const simulation = getSimulation();
+      if (!isDeadMode() || !simulation?.commands?.length) return;
+      const config = getConfig();
+      let currentPen = null;
+      let currentCube = null;
+      let currentTheta = null;
+      for (const command of simulation.commands) {
+        if (command.type === "pen") {
+          if (currentPen && command.penX != null) {
+            command.penX = currentPen.x;
+            command.penY = currentPen.y;
+          } else if (command.penX != null) {
+            currentPen = { x: command.penX, y: command.penY };
+          }
+          continue;
+        }
+        if (command.type === "turn") {
+          if (!currentCube && command.x != null && command.y != null) currentCube = { x: command.x, y: command.y };
+          const theta = command.theta ?? currentTheta ?? 0;
+          command.theta = theta;
+          if (currentCube) {
+            command.x = currentCube.x;
+            command.y = currentCube.y;
+            currentPen = cubeToPen(currentCube, theta, config);
+            command.penX = currentPen.x;
+            command.penY = currentPen.y;
+          }
+          currentTheta = theta;
+          continue;
+        }
+        if (command.type !== "motor") continue;
+        if (command.geometry !== "line") {
+          if (command.x != null && command.y != null) currentCube = { x: command.x, y: command.y };
+          if (command.theta != null) currentTheta = command.theta;
+          if (command.penX != null) currentPen = { x: command.penX, y: command.penY };
+          continue;
+        }
+        const theta = command.theta ?? currentTheta ?? 0;
+        const startCube = currentCube || (currentPen ? penToCube(currentPen, theta, config) : { x: command.fromX ?? command.x, y: command.fromY ?? command.y });
+        if (!startCube || startCube.x == null || startCube.y == null) continue;
+        const distanceMm = deadLineMotionDistanceMm(command);
+        const endCube = {
+          x: startCube.x + Math.cos(degToRad(theta)) * distanceMm,
+          y: startCube.y + Math.sin(degToRad(theta)) * distanceMm,
+        };
+        command.fromX = startCube.x;
+        command.fromY = startCube.y;
+        command.x = endCube.x;
+        command.y = endCube.y;
+        command.theta = theta;
+        currentCube = endCube;
+        currentTheta = theta;
+        currentPen = cubeToPen(endCube, theta, config);
+        command.penX = currentPen.x;
+        command.penY = currentPen.y;
+      }
+    }
+
+    function deadLineMotionDistanceMm(command) {
+      const config = getConfig();
+      const draw = command.kind === "draw";
+      const baseSpeed = Math.max(1, Math.abs(Number(draw ? config.drawSpeed : config.travelSpeed) || 1));
+      const mmPerSec = draw ? DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED : Math.max(1, Number(config.deadMmPerSecAtTravelSpeed) || 1);
+      const speed = command.speed ?? (((Number(command.leftSpeed) || 0) + (Number(command.rightSpeed) || 0)) / 2);
+      return mmPerSec * ((Number(speed) || 0) / baseSpeed) * ((command.durationMs || 0) / 1000);
+    }
+
+    function deadDrawPreviewScale(command, baseDistance) {
+      if (baseDistance < 0.1) return 0;
+      const config = getConfig();
+      const baseSpeed = Math.max(1, Math.abs(Number(config.drawSpeed) || 1));
+      const speedScale = (Number(command.speed) || 0) / baseSpeed;
+      const previewDistance = DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED * speedScale * ((command.durationMs || 0) / 1000);
+      return previewDistance / baseDistance;
+    }
+
+    function deadRelativeMotionScale(command, base) {
+      const speedScale = (command.speed || 0) / (Math.abs(base.speed || 1) < 1 ? 1 : base.speed);
+      const durationScale = (command.durationMs || 0) / Math.max(1, base.durationMs || 1);
+      return speedScale * durationScale;
     }
 
     function updateManualTurnPose(command, index) {
@@ -421,6 +516,7 @@
       ensureMotorBaseline,
       updateStraightMotorPose,
       updateManualTurnPose,
+      reflowDeadLineCommandPath,
       turnStartThetaAtCommand,
       manualTurnAngle,
     };

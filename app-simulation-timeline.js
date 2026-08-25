@@ -14,6 +14,8 @@
       minTurnDurationMs,
     } = deps;
 
+    const DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED = 57;
+
     function buildSimulationTimeline(commands) {
       const mode = simulationModeForCommands(commands);
       const config = getConfig();
@@ -161,17 +163,18 @@
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
         const fromCube = {
-          x: command.fromX ?? item.fromCubePose.x,
-          y: command.fromY ?? item.fromCubePose.y,
+          x: item.fromCubePose.x,
+          y: item.fromCubePose.y,
           theta: item.fromCubePose.theta,
         };
-        const cubePoint = {
-          x: fromCube.x + (command.x - fromCube.x) * t,
-          y: fromCube.y + (command.y - fromCube.y) * t,
-        };
         const theta = command.theta ?? fromCube.theta;
+        const distanceMm = deadLineMotionDistanceMm(command, config) * t;
+        const cubePoint = {
+          x: fromCube.x + Math.cos((theta * Math.PI) / 180) * distanceMm,
+          y: fromCube.y + Math.sin((theta * Math.PI) / 180) * distanceMm,
+        };
         const penPoint = cubeToPen(cubePoint, theta, config);
-        return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y };
+        return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y, previewProgress: t };
       }
       if (command.type === "motor" && command.x != null && command.y != null && command.fromX != null && command.fromY != null) {
         const span = Math.max(1, item.endMs - item.startMs);
@@ -182,9 +185,22 @@
         };
         const theta = command.theta || 0;
         const penPoint = cubeToPen(cubePoint, theta, config);
-        return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y };
+        return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y, previewProgress: t };
       }
       return command;
+    }
+
+    function deadLineMotionDistanceMm(command, config) {
+      if (command.kind !== "draw" && command.kind !== "travel" && command.fromX != null && command.fromY != null && command.x != null && command.y != null) {
+        return Math.hypot(command.x - command.fromX, command.y - command.fromY);
+      }
+      const draw = command.kind === "draw";
+      const baseSpeed = Math.max(1, Math.abs(Number(draw ? config.drawSpeed : config.travelSpeed) || 1));
+      const mmPerSec = draw
+        ? DEAD_DRAW_PREVIEW_MM_PER_SEC_AT_DRAW_SPEED
+        : Math.max(1, Number(config.deadMmPerSecAtTravelSpeed) || 1);
+      const speed = command.speed ?? (((Number(command.leftSpeed) || 0) + (Number(command.rightSpeed) || 0)) / 2);
+      return mmPerSec * ((Number(speed) || 0) / baseSpeed) * ((command.durationMs || 0) / 1000);
     }
 
     function partialPositionCommand(item, elapsedMs) {
