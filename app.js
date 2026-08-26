@@ -194,7 +194,7 @@ const simulationPlayback = window.ToioPlotterSimulationPlayer.createSimulationPl
   requestFrame: (callback) => requestAnimationFrame(callback),
   cancelFrame: (frameId) => cancelAnimationFrame(frameId),
   onControlsChanged: () => syncSimulationControls(),
-  onActiveCommandChanged: () => updateActiveCommandRow(),
+  onActiveCommandChanged: () => commandEditor.updateActiveCommandRow(),
   onDraw: () => draw(),
 });
 
@@ -208,7 +208,7 @@ const commandEditor = window.ToioPlotterCommandEditor.createCommandEditor({
   formatDeadToioCommand,
   formatPositionToioCommand,
   escapeHtml,
-  commandDurationMs,
+  commandDurationMs: simulationTimelineTools.commandDurationMs,
   roundToMotorDurationMs,
   clamp,
   minTurnDurationMs: MIN_TURN_DURATION_MS,
@@ -236,9 +236,9 @@ const toioRunner = window.ToioPlotterRunner.createToioRunner({
   getLastMovePoseAt: () => lastMovePoseAt,
   matToNativePoint,
   pointInBounds,
-  getPenCommandSpeed,
-  getPenCommandDuration,
-  motorStraightSpeed,
+  getPenCommandSpeed: (command) => commandEditor.getPenCommandSpeed(command),
+  getPenCommandDuration: (command) => commandEditor.getPenCommandDuration(command),
+  motorStraightSpeed: (command) => commandEditor.motorStraightSpeed(command),
   turnWheelSpeeds,
   turnMsPer90,
   roundToMotorDurationMs,
@@ -254,7 +254,7 @@ const toioRunner = window.ToioPlotterRunner.createToioRunner({
   runButtonEl: els.runBtn,
   log,
   syncRunButton,
-  renderToioCommandOutput,
+  renderToioCommandOutput: () => commandEditor.renderToioCommandOutput(),
 });
 
 function resetDeadSegmentSettings() {
@@ -314,7 +314,7 @@ function invalidateSimulation(reason) {
   els.runBtn.disabled = true;
   updateSb3ExportButton();
   setPill(els.simStatus, "未シミュレーション", "warn");
-  renderToioCommandOutput();
+  commandEditor.renderToioCommandOutput();
   if (reason) log(reason);
 }
 
@@ -433,9 +433,9 @@ function cubeToPen(point, theta, configInput = {}) {
 function runSimulation() {
   applyConfigFromForm({ invalidate: false });
   stopSimulationAnimation();
-  captureCommandOverrides();
+  commandEditor.captureCommandOverrides();
   simulation = createSimulation();
-  applyCommandOverrides();
+  commandEditor.applyCommandOverrides();
   if (!isDeadMode()) strokes = simulation.processedStrokes;
   if (!simulation.commands.length) {
     simulationValid = false;
@@ -472,7 +472,7 @@ function runSimulation() {
   if (simulationValid && isDeadMode() && !getSelectedDeadSegment()) selectFirstDeadDrawSegment();
   updateSb3ExportButton();
   renderDeadSegmentsEditor();
-  renderToioCommandOutput();
+  commandEditor.renderToioCommandOutput();
   if (simulationValid) startSimulationAnimation();
   draw();
 }
@@ -480,7 +480,7 @@ function runSimulation() {
 function buildImportedSimulation(reason) {
   stopSimulationAnimation();
   simulation = createSimulation();
-  applyCommandOverrides();
+  commandEditor.applyCommandOverrides();
   if (!isDeadMode()) strokes = simulation.processedStrokes;
   const hasErrors = simulation.errors.length > 0;
   simulationValid = !hasErrors && simulation.commands.length > 0;
@@ -491,23 +491,7 @@ function buildImportedSimulation(reason) {
   if (reason) log(reason);
   if (hasErrors) log(`Import simulation failed:\n${simulation.errors.join("\n")}`);
   renderDeadSegmentsEditor();
-  renderToioCommandOutput();
-}
-
-function captureCommandOverrides() {
-  commandEditor.captureCommandOverrides();
-}
-
-function applyCommandOverrides() {
-  commandEditor.applyCommandOverrides();
-}
-
-function commandOverrideFromCommand(command) {
-  return commandEditor.commandOverrideFromCommand(command);
-}
-
-function commandOverrideKey(command, index, commands) {
-  return commandEditor.commandOverrideKey(command, index, commands);
+  commandEditor.renderToioCommandOutput();
 }
 
 function startSimulationAnimation() {
@@ -585,10 +569,10 @@ function formatCommandForReport(command) {
   if (!command || !label) return "";
   if (command.type === "motor") {
     const details = [
-      `left:${Math.round(command.leftSpeed ?? motorStraightSpeed(command))}`,
-      `right:${Math.round(command.rightSpeed ?? motorStraightSpeed(command))}`,
+      `left:${Math.round(command.leftSpeed ?? commandEditor.motorStraightSpeed(command))}`,
+      `right:${Math.round(command.rightSpeed ?? commandEditor.motorStraightSpeed(command))}`,
       `durationMs:${command.durationMs || 0}`,
-      `distanceScale:${motorDistanceScale(command).toFixed(2)}`,
+      `distanceScale:${commandEditor.motorDistanceScale(command).toFixed(2)}`,
     ];
     if (command.segmentId) details.push(`segment:${command.segmentId}`);
     if (command.role) details.push(`role:${command.role}`);
@@ -599,7 +583,7 @@ function formatCommandForReport(command) {
     return `${label} (left:${speeds.left}, right:${speeds.right}, durationMs:${command.durationMs || 0})`;
   }
   if (command.type === "pen") {
-    return `${label} (durationMs:${getPenCommandDuration(command)})`;
+    return `${label} (durationMs:${commandEditor.getPenCommandDuration(command)})`;
   }
   return label;
 }
@@ -632,26 +616,6 @@ async function copyText(text) {
 
 function getAnimatedCommands() {
   return simulationPlayback.getAnimatedCommands();
-}
-
-function buildSimulationTimeline(commands) {
-  return simulationTimelineTools.buildSimulationTimeline(commands);
-}
-
-function commandDurationMs(command, lastPenPoint) {
-  return simulationTimelineTools.commandDurationMs(command, lastPenPoint);
-}
-
-function activeCommandIndexAtElapsed(timeline, elapsedMs) {
-  return simulationTimelineTools.activeCommandIndexAtElapsed(timeline, elapsedMs);
-}
-
-function lastPlayableCommandIndex(timeline) {
-  return simulationTimelineTools.lastPlayableCommandIndex(timeline);
-}
-
-function commandsAtElapsed(timeline, elapsedMs) {
-  return simulationTimelineTools.commandsAtElapsed(timeline, elapsedMs);
 }
 
 function renderDeadSegmentsEditor() {
@@ -690,79 +654,11 @@ function renderDeadSegmentsEditor() {
   `;
 }
 
-function renderToioCommandOutput() {
-  commandEditor.renderToioCommandOutput();
-}
-
-function commandRowTemplate(command, index) {
-  return commandEditor.commandRowTemplate(command, index);
-}
-
-function commandControlsTemplate(command, index) {
-  return commandEditor.commandControlsTemplate(command, index);
-}
-
-function motorStraightSpeed(command) {
-  return commandEditor.motorStraightSpeed(command);
-}
-
-function motorDistanceScale(command) {
-  return commandEditor.motorDistanceScale(command);
-}
-
-function displayCommandDurationMs(index) {
-  return commandEditor.displayCommandDurationMs(index);
-}
-
-function commandInputTemplate(index, key, label, value, step, min, max) {
-  return commandEditor.commandInputTemplate(index, key, label, value, step, min, max);
-}
-
-function getPenCommandSpeed(command) {
-  return commandEditor.getPenCommandSpeed(command);
-}
-
-function getPenCommandDuration(command) {
-  return commandEditor.getPenCommandDuration(command);
-}
-
-function updateActiveCommandRow() {
-  commandEditor.updateActiveCommandRow();
-}
-
-function updateCommandEdit(input, { render = true } = {}) {
-  commandEditor.updateCommandEdit(input, { render });
-}
-
-function ensureMotorBaseline(command) {
-  commandEditor.ensureMotorBaseline(command);
-}
-
-function updateStraightMotorPose(command) {
-  commandEditor.updateStraightMotorPose(command);
-}
-
-function updateManualTurnPose(command, index) {
-  commandEditor.updateManualTurnPose(command, index);
-}
-
-function turnStartThetaAtCommand(index, command) {
-  return commandEditor.turnStartThetaAtCommand(index, command);
-}
-
-function manualTurnAngle(command) {
-  return commandEditor.manualTurnAngle(command);
-}
-
 function jumpToCommand(index) {
   if (!simulationPlayback.focusCommand(index)) return;
   syncSimulationControls();
-  updateActiveCommandRow();
+  commandEditor.updateActiveCommandRow();
   draw();
-}
-
-function timelineItemForCommand(timeline, commandIndex) {
-  return simulationTimelineTools.timelineItemForCommand(timeline, commandIndex);
 }
 
 function formatDeadToioCommands(commands) {
@@ -772,7 +668,7 @@ function formatDeadToioCommands(commands) {
 function formatDeadToioCommand(command) {
   if (command.type === "pen") {
     const action = command.state === "up" ? "UP" : "DOWN";
-    return `pen: ${action} speed:${getPenCommandSpeed(command)}, ${formatSeconds(getPenCommandDuration(command))}`;
+    return `pen: ${action} speed:${commandEditor.getPenCommandSpeed(command)}, ${formatSeconds(commandEditor.getPenCommandDuration(command))}`;
   }
   if (command.type === "turn") {
     const speeds = turnWheelSpeeds(command);
@@ -781,7 +677,7 @@ function formatDeadToioCommand(command) {
   if (command.type === "motor") {
     const label = command.kind === "draw" ? `draw ${command.geometry === "arc" ? "arc" : "straight"}` : "travel straight";
     if (command.geometry === "arc") return `move: ${label} / R:${Math.round(command.rightSpeed)}, L:${Math.round(command.leftSpeed)}, ${formatSeconds(command.durationMs)}`;
-    return `move: ${label} / speed:${motorStraightSpeed(command)}, ${formatSeconds(command.durationMs)}`;
+    return `move: ${label} / speed:${commandEditor.motorStraightSpeed(command)}, ${formatSeconds(command.durationMs)}`;
   }
   if (command.type === "wait") return "wait";
   return null;
@@ -794,7 +690,7 @@ function formatPositionToioCommands(commands) {
 function formatPositionToioCommand(command) {
   if (command.type === "pen") {
     const action = command.state === "up" ? "UP" : "DOWN";
-    return `pen: ${action} speed:${getPenCommandSpeed(command)}, ${formatSeconds(getPenCommandDuration(command))}`;
+    return `pen: ${action} speed:${commandEditor.getPenCommandSpeed(command)}, ${formatSeconds(commandEditor.getPenCommandDuration(command))}`;
   }
   if (command.type === "move" || command.type === "rotate") {
     return `move: ${command.type} x:${command.x.toFixed(1)}, y:${command.y.toFixed(1)}, theta:${command.theta.toFixed(0)}, speed:${command.speed}`;
@@ -974,7 +870,7 @@ function updateDeadSegmentSetting(input) {
   setPill(els.simStatus, simulationValid ? "成功" : "失敗", simulationValid ? "ok" : "error");
   if (hasErrors) log(`線分調整エラー:\n${simulation.errors.join("\n")}`);
   renderDeadSegmentsEditor();
-  renderToioCommandOutput();
+  commandEditor.renderToioCommandOutput();
   draw();
 }
 
@@ -1019,7 +915,7 @@ async function emergencyStop() {
 }
 
 function exportDrawing() {
-  captureCommandOverrides();
+  commandEditor.captureCommandOverrides();
   const payload = {
     version: 1,
     createdAt: new Date().toISOString(),
@@ -1066,8 +962,8 @@ async function exportSb3() {
       mat: MAT,
       config,
       turnWheelSpeeds,
-      getPenCommandSpeed,
-      getPenCommandDuration,
+      getPenCommandSpeed: (command) => commandEditor.getPenCommandSpeed(command),
+      getPenCommandDuration: (command) => commandEditor.getPenCommandDuration(command),
     });
     const blob = new Blob([sb3Bytes], { type: "application/octet-stream" });
     const url = URL.createObjectURL(blob);
@@ -1391,10 +1287,10 @@ function bindEvents() {
   els.simNextStepBtn?.addEventListener("click", () => stepSimulation(1));
   els.copyCommandReportBtn?.addEventListener("click", () => copyCommandReport().catch((error) => log(`Copy failed: ${error.message}`)));
   els.toioCommandOutput?.addEventListener("input", (event) => {
-    if (event.target instanceof HTMLInputElement) updateCommandEdit(event.target, { render: false });
+    if (event.target instanceof HTMLInputElement) commandEditor.updateCommandEdit(event.target, { render: false });
   });
   els.toioCommandOutput?.addEventListener("change", (event) => {
-    if (event.target instanceof HTMLInputElement) updateCommandEdit(event.target, { render: true });
+    if (event.target instanceof HTMLInputElement) commandEditor.updateCommandEdit(event.target, { render: true });
   });
   els.toioCommandOutput?.addEventListener("click", (event) => {
     const button = event.target.closest?.("[data-command-step]");
@@ -1459,7 +1355,7 @@ function init() {
   syncConfigToForm();
   syncLegendToggle();
   renderDeadSegmentsEditor();
-  renderToioCommandOutput();
+  commandEditor.renderToioCommandOutput();
   renderTurnCalibration();
   updateSb3ExportButton();
   bindEvents();

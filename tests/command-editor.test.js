@@ -16,6 +16,8 @@ function loadCommandEditor({
 }) {
   const context = { window: {}, Math };
   vm.createContext(context);
+  const deadMotionSource = fs.readFileSync(path.join(__dirname, "..", "app-dead-motion.js"), "utf8");
+  vm.runInContext(deadMotionSource, context);
   const source = fs.readFileSync(path.join(__dirname, "..", "app-command-editor.js"), "utf8");
   vm.runInContext(source, context);
   return context.window.ToioPlotterCommandEditor.createCommandEditor({

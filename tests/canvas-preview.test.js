@@ -10,6 +10,8 @@ function loadCanvasRenderer({ config }) {
   const context = { window: {}, globalThis: {}, Math };
   context.globalThis = context;
   vm.createContext(context);
+  const deadMotionSource = fs.readFileSync(path.join(__dirname, "..", "app-dead-motion.js"), "utf8");
+  vm.runInContext(deadMotionSource, context);
   const source = fs.readFileSync(path.join(__dirname, "..", "app-canvas.js"), "utf8");
   vm.runInContext(source, context);
   return context.ToioPlotterCanvas.createCanvasRenderer({

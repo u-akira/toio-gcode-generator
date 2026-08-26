@@ -1,6 +1,8 @@
 "use strict";
 
 (function () {
+  const deadMotion = window.ToioPlotterDeadMotion;
+
   function createCommandEditor(deps) {
     const {
       outputEl,
@@ -364,7 +366,7 @@
       const dy = base.y - base.fromY;
       const baseDistance = Math.hypot(dx, dy);
       const scale = command.kind === "draw"
-        ? deadDrawPreviewScale(command, baseDistance)
+        ? deadMotion.deadDrawLinePreviewScale(command, baseDistance, getConfig())
         : deadRelativeMotionScale(command, base);
       command.leftSpeed = command.speed;
       command.rightSpeed = command.speed;
@@ -419,7 +421,7 @@
         const theta = command.theta ?? currentTheta ?? 0;
         const startCube = currentCube || (currentPen ? penToCube(currentPen, theta, config) : { x: command.fromX ?? command.x, y: command.fromY ?? command.y });
         if (!startCube || startCube.x == null || startCube.y == null) continue;
-        const distanceMm = deadLineMotionDistanceMm(command);
+        const distanceMm = deadMotion.deadLineMotionDistanceMm(command, config);
         const endCube = {
           x: startCube.x + Math.cos(degToRad(theta)) * distanceMm,
           y: startCube.y + Math.sin(degToRad(theta)) * distanceMm,
@@ -435,28 +437,6 @@
         command.penX = currentPen.x;
         command.penY = currentPen.y;
       }
-    }
-
-    function deadLineMotionDistanceMm(command) {
-      const config = getConfig();
-      const draw = command.kind === "draw";
-      const baseSpeed = Math.max(1, Math.abs(Number(draw ? config.drawSpeed : config.travelSpeed) || 1));
-      const mmPerSec = draw ? deadDrawMmPerSec(config) : Math.max(1, Number(config.deadMmPerSecAtTravelSpeed) || 1);
-      const speed = command.speed ?? (((Number(command.leftSpeed) || 0) + (Number(command.rightSpeed) || 0)) / 2);
-      return mmPerSec * ((Number(speed) || 0) / baseSpeed) * ((command.durationMs || 0) / 1000);
-    }
-
-    function deadDrawPreviewScale(command, baseDistance) {
-      if (baseDistance < 0.1) return 0;
-      const config = getConfig();
-      const baseSpeed = Math.max(1, Math.abs(Number(config.drawSpeed) || 1));
-      const speedScale = (Number(command.speed) || 0) / baseSpeed;
-      const previewDistance = deadDrawMmPerSec(config) * speedScale * ((command.durationMs || 0) / 1000);
-      return previewDistance / baseDistance;
-    }
-
-    function deadDrawMmPerSec(config) {
-      return Math.max(1, Number(config.deadMmPerSecAtDrawSpeed) || 30);
     }
 
     function deadRelativeMotionScale(command, base) {

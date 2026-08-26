@@ -2,6 +2,7 @@
   "use strict";
 
   function createCanvasRenderer(deps) {
+    const deadMotion = root.ToioPlotterDeadMotion;
     const {
       MAT,
       COLORS,
@@ -465,8 +466,8 @@
             y: startCube.y + (targetCube.y - startCube.y) * progress,
           }
         : {
-            x: startCube.x + Math.cos(degToRad(theta)) * deadLineMotionDistanceMm(command, config) * progress,
-            y: startCube.y + Math.sin(degToRad(theta)) * deadLineMotionDistanceMm(command, config) * progress,
+            x: startCube.x + Math.cos(degToRad(theta)) * deadMotion.deadLineMotionDistanceMm(command, config) * progress,
+            y: startCube.y + Math.sin(degToRad(theta)) * deadMotion.deadLineMotionDistanceMm(command, config) * progress,
           };
       const startPose = { ...startCube, theta: command.startTheta ?? state.currentTheta ?? theta };
       const endPose = { ...endCube, theta };
@@ -535,21 +536,6 @@
 
     function finitePoint(x, y) {
       return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
-    }
-
-    function deadLineMotionDistanceMm(command, config) {
-      if (command.kind !== "draw" && command.kind !== "travel" && command.fromX != null && command.fromY != null && command.x != null && command.y != null) {
-        return Math.hypot(command.x - command.fromX, command.y - command.fromY);
-      }
-      const draw = command.kind === "draw";
-      const baseSpeed = Math.max(1, Math.abs(Number(draw ? config.drawSpeed : config.travelSpeed) || 1));
-      const mmPerSec = draw ? deadDrawMmPerSec(config) : Math.max(1, Number(config.deadMmPerSecAtTravelSpeed) || 1);
-      const speed = command.speed ?? (((Number(command.leftSpeed) || 0) + (Number(command.rightSpeed) || 0)) / 2);
-      return mmPerSec * ((Number(speed) || 0) / baseSpeed) * ((command.durationMs || 0) / 1000);
-    }
-
-    function deadDrawMmPerSec(config) {
-      return Math.max(1, Number(config.deadMmPerSecAtDrawSpeed) || 30);
     }
 
     function drawCubePath(points) {
