@@ -119,17 +119,16 @@
         if (deadPreview) {
           drawCubePath(deadPreview.cubePath);
           drawDeadSegmentSelectionOverlay(deadPreview);
-          drawCommandPreview(deadPreview);
+          drawCommandPreviewBase(deadPreview);
           if (!simulationAnimation) drawCubeHeadingMarkers(deadPreview.cubePath);
         } else {
           drawDeadSegmentSelectionOverlay(null);
-          drawCommands(animatedCommands);
+          if (!simulationAnimation) drawCubePath(simulation.cubePath);
         }
         if (simulationAnimation) {
           deadPreview ? drawAnimationCursorFromPreview(deadPreview) : drawAnimationCursor(animatedCommands);
-        } else if (!deadPreview) {
-          drawCubePath(simulation.cubePath);
         }
+        deadPreview ? drawCommandPreviewPenDown(deadPreview) : drawCommands(animatedCommands);
       }
       const poseStatus = getMovePoseStatus();
       if (!isDeadMode() && poseStatus.pose && poseStatus.state !== "missed") {
@@ -327,16 +326,24 @@
       if (penDown && downPoints.length > 1) downSegments.push(downPoints);
       if (!penDown && upPoints.length > 1) upSegments.push(upPoints);
       for (const segment of upSegments) drawStroke(segment, COLORS.penTravel, 1.25, [5, 5]);
-      for (const segment of downSegments) drawStroke(segment, COLORS.penSimulation, 1.6);
       for (const event of events) drawPenEvent(event);
       for (const point of waitPoints) drawWaitPoint(point);
+      for (const segment of downSegments) drawStroke(segment, COLORS.penSimulation, 1.6);
     }
 
     function drawCommandPreview(preview) {
+      drawCommandPreviewBase(preview);
+      drawCommandPreviewPenDown(preview);
+    }
+
+    function drawCommandPreviewBase(preview) {
       for (const segment of preview.penUpSegments) drawStroke(segment, "rgba(107, 114, 128, 0.42)", 1.1, [5, 5]);
-      for (const segment of preview.penDownSegments) drawStroke(segment, COLORS.penSimulation, 3.2);
       for (const event of preview.events) drawPenEvent(event);
       for (const point of preview.waitPoints) drawWaitPoint(point);
+    }
+
+    function drawCommandPreviewPenDown(preview) {
+      for (const segment of preview.penDownSegments) drawStroke(segment, COLORS.penSimulation, 3.2);
     }
 
     function buildDeadCommandPreview(commands) {

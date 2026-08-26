@@ -2,9 +2,9 @@
   <rect x="98" y="142" width="304" height="216" fill="#fffdf8"/>
   <g fill="none" stroke="#202124" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
     <path d="M135 205 L135 295 M135 205 L180 225 L180 275 L135 295"/>
-    <path d="M229 232 L241 232 L249 242 L249 278 L241 288 L229 288 L221 278 L221 242 Z"/>
+    <path d="M221 232 L249 232 L249 288 L221 288 Z"/>
     <path d="M307 230 L307 295 L287 310 L270 295"/>
-    <path d="M344 232 L356 232 L364 242 L364 278 L356 288 L344 288 L336 278 L336 242 Z"/>
+    <path d="M336 232 L364 232 L364 288 L336 288 Z"/>
   </g>
-  <circle cx="302" cy="205" r="4" fill="#202124"/>
+  <circle cx="307" cy="205" r="4" fill="#202124"/>
 </svg>

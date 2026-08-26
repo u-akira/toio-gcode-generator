@@ -790,7 +790,10 @@ test("star sample dead reckoning draw segments preserve the sample size", () => 
 });
 
 test("coder and dojo samples use straight segments for lowercase o", () => {
-  for (const sample of [coderSample, dojoSample]) {
+  for (const { sample, edgeCount } of [
+    { sample: coderSample, edgeCount: 4 },
+    { sample: dojoSample, edgeCount: 4 },
+  ]) {
     const result = core.createDeadReckoningSimulation({
       strokes: sample.strokes,
       config: core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: -48, penOffsetY: 0 }),
@@ -798,7 +801,7 @@ test("coder and dojo samples use straight segments for lowercase o", () => {
     const hasSpin = sample.strokes.some((stroke) => stroke.primitives?.some((primitive) => primitive.kind === "spin"));
     const closedLineO = sample.strokes.some((stroke) => {
       const primitives = stroke.primitives || [];
-      if (primitives.length !== 8 || !primitives.every((primitive) => primitive.kind === "line")) return false;
+      if (primitives.length !== edgeCount || !primitives.every((primitive) => primitive.kind === "line")) return false;
       return core.distance(primitives[0].start, primitives[primitives.length - 1].end) < 0.1;
     });
 
