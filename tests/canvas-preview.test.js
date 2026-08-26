@@ -96,6 +96,20 @@ test("dead command preview keeps drawn segments after pen up", () => {
   assert.equal(Math.round(preview.penDownSegments[0].at(-1).x), 67);
 });
 
+test("dead command preview keeps pen-down wait points as drawing output", () => {
+  const config = core.withDefaults({ drawSpeed: 20, penOffsetX: 0, penOffsetY: 0 });
+  const renderer = loadCanvasRenderer({ config });
+  const preview = renderer.__test.buildDeadCommandPreview([
+    { type: "pen", state: "down", penX: 222, penY: 226 },
+    { type: "wait", ms: 1000, penX: 222, penY: 226 },
+    { type: "pen", state: "up", penX: 222, penY: 226 },
+  ]);
+
+  assert.equal(preview.waitPoints.length, 1);
+  assert.equal(preview.waitPoints[0].x, 222);
+  assert.equal(preview.waitPoints[0].y, 226);
+});
+
 test("dead command preview uses command endpoints for straight draw lines", () => {
   const config = core.withDefaults({ drawSpeed: 20, penOffsetX: 0, penOffsetY: 0 });
   const renderer = loadCanvasRenderer({ config });

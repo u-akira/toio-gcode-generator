@@ -280,6 +280,7 @@
       const downSegments = [];
       const upSegments = [];
       const events = [];
+      const waitPoints = [];
       let downPoints = [];
       let upPoints = [];
       let penDown = false;
@@ -316,6 +317,10 @@
             upPoints.push(point);
           }
           lastPenPoint = point;
+        } else if (command.type === "wait") {
+          const point = command.penX != null && command.penY != null ? { x: command.penX, y: command.penY } : lastPenPoint;
+          if (penDown && point) waitPoints.push(point);
+          if (point) lastPenPoint = point;
         }
       }
       if (penDown && downPoints.length > 1) downSegments.push(downPoints);
@@ -323,12 +328,14 @@
       for (const segment of upSegments) drawStroke(segment, COLORS.penTravel, 1.25, [5, 5]);
       for (const segment of downSegments) drawStroke(segment, COLORS.penSimulation, 1.6);
       for (const event of events) drawPenEvent(event);
+      for (const point of waitPoints) drawWaitPoint(point);
     }
 
     function drawCommandPreview(preview) {
       for (const segment of preview.penUpSegments) drawStroke(segment, "rgba(107, 114, 128, 0.42)", 1.1, [5, 5]);
       for (const segment of preview.penDownSegments) drawStroke(segment, COLORS.penSimulation, 3.2);
       for (const event of preview.events) drawPenEvent(event);
+      for (const point of preview.waitPoints) drawWaitPoint(point);
     }
 
     function buildDeadCommandPreview(commands) {
@@ -337,6 +344,7 @@
         penDownSegments: [],
         penUpSegments: [],
         events: [],
+        waitPoints: [],
         cubePath: [],
         segmentPenPaths: new Map(),
         currentCube: null,
@@ -371,6 +379,11 @@
           continue;
         }
 
+        if (command.type === "wait") {
+          replayWaitCommand(command, state);
+          continue;
+        }
+
         if (command.type === "move" || command.type === "rotate") {
           replayPositionCommand(command, state);
         }
@@ -381,6 +394,7 @@
         penDownSegments: state.penDownSegments,
         penUpSegments: state.penUpSegments,
         events: state.events,
+        waitPoints: state.waitPoints,
         cubePath: state.cubePath,
         segmentPenPaths: state.segmentPenPaths,
         finalPenPoint: state.currentPen,
@@ -400,6 +414,13 @@
       if (!down && state.upPoints.length > 1) state.penUpSegments.push(state.upPoints);
       if (down) state.downPoints = [];
       if (!down) state.upPoints = [];
+    }
+
+    function replayWaitCommand(command, state) {
+      const point = commandPointOrCurrentPen(command, state);
+      if (!point) return;
+      state.currentPen = point;
+      if (state.penState === "down") state.waitPoints.push(point);
     }
 
     function replayTurnCommand(command, state, config) {
@@ -658,6 +679,17 @@
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(isDown ? "D" : "U", point.x, point.y - 0.5 * dpr);
+      ctx.restore();
+    }
+
+    function drawWaitPoint(point) {
+      const dpr = root.devicePixelRatio || 1;
+      const canvasPoint = matToCanvas(point);
+      ctx.save();
+      ctx.fillStyle = COLORS.penSimulation;
+      ctx.beginPath();
+      ctx.arc(canvasPoint.x, canvasPoint.y, 4.5 * dpr, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
     }
 
