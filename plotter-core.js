@@ -42,7 +42,8 @@
     deadTurnSpeed: 8,
     deadTurnBalanceTrim: 0,
     deadTurnMsPer90: 990,
-    deadMmPerSecAtDrawSpeed: 30,
+    deadMmPerSecAtDrawSpeed: 56,
+    deadArcMmPerSecAtDrawSpeed: 30,
     deadMmPerSecAtTravelSpeed: 70,
     deadTravelDistanceScale: 1,
     deadWheelBaseMm: 26,
@@ -464,7 +465,7 @@
       const turnAngleValue = signedAngleDelta(previousHeading, arc.startHeading);
       const saved = this.segmentSettings[id] || {};
       const baseSpeed = kind === "draw" ? config.drawSpeed : config.travelSpeed;
-      const baseMmPerSec = kind === "draw" ? config.deadMmPerSecAtDrawSpeed : config.deadMmPerSecAtTravelSpeed;
+      const baseMmPerSec = kind === "draw" ? config.deadArcMmPerSecAtDrawSpeed : config.deadMmPerSecAtTravelSpeed;
       const speed = clamp(Number(saved.speed ?? baseSpeed), 1, 255);
       const durationScale = clamp(Number(saved.durationScale ?? 1), 0.1, 5);
       const steeringTrim = clamp(Number(saved.steeringTrim ?? 0), -80, 80);

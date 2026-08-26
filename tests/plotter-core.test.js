@@ -288,6 +288,74 @@ test("dead reckoning simulation creates draw segments and motor commands", () =>
   assert.ok(result.commands.some((command) => command.type === "motor"));
 });
 
+test("default dead reckoning draw timing maps 140mm to 2500ms", () => {
+  const stroke = makeStroke([
+    [180, 250],
+    [320, 250],
+  ]);
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0 })).plan([stroke]);
+  const drawMotor = result.commands.find((command) => command.type === "motor" && command.kind === "draw");
+
+  assert.equal(result.segments[0].lengthMm, 140);
+  assert.equal(drawMotor.durationMs, 2500);
+});
+
+test("dead reckoning draw timing calibration does not change line geometry", () => {
+  const stroke = makeStroke([
+    [180, 250],
+    [320, 250],
+  ]);
+  const slow = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadMmPerSecAtDrawSpeed: 30 })).plan([stroke]);
+  const fast = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, deadMmPerSecAtDrawSpeed: 56 })).plan([stroke]);
+  const slowMotor = slow.commands.find((command) => command.type === "motor" && command.kind === "draw");
+  const fastMotor = fast.commands.find((command) => command.type === "motor" && command.kind === "draw");
+
+  assert.equal(slow.segments[0].lengthMm, fast.segments[0].lengthMm);
+  assert.deepEqual(slow.segments[0].start, fast.segments[0].start);
+  assert.deepEqual(slow.segments[0].end, fast.segments[0].end);
+  assert.equal(slowMotor.fromX, fastMotor.fromX);
+  assert.equal(slowMotor.fromY, fastMotor.fromY);
+  assert.equal(slowMotor.x, fastMotor.x);
+  assert.equal(slowMotor.y, fastMotor.y);
+  assert.equal(slowMotor.penX, fastMotor.penX);
+  assert.equal(slowMotor.penY, fastMotor.penY);
+  assert.notEqual(slowMotor.durationMs, fastMotor.durationMs);
+});
+
+test("dead reckoning straight draw timing calibration does not affect arcs", () => {
+  const stroke = {
+    raw: [
+      { x: 320, y: 250 },
+      { x: 250, y: 320 },
+      { x: 180, y: 250 },
+    ],
+    primitives: [
+      {
+        kind: "arc",
+        center: { x: 250, y: 250 },
+        radius: 70,
+        startAngle: 0,
+        sweepAngle: 180,
+      },
+    ],
+  };
+  const slowStraight = new core.DeadReckoningPlanner(
+    core.withDefaults({ smoothing: 0, lineCorrection: 0, deadMmPerSecAtDrawSpeed: 30, deadArcMmPerSecAtDrawSpeed: 30 }),
+  ).plan([stroke]);
+  const fastStraight = new core.DeadReckoningPlanner(
+    core.withDefaults({ smoothing: 0, lineCorrection: 0, deadMmPerSecAtDrawSpeed: 56, deadArcMmPerSecAtDrawSpeed: 30 }),
+  ).plan([stroke]);
+  const fastArc = new core.DeadReckoningPlanner(
+    core.withDefaults({ smoothing: 0, lineCorrection: 0, deadMmPerSecAtDrawSpeed: 56, deadArcMmPerSecAtDrawSpeed: 56 }),
+  ).plan([stroke]);
+  const slowStraightMotor = slowStraight.commands.find((command) => command.type === "motor" && command.kind === "draw");
+  const fastStraightMotor = fastStraight.commands.find((command) => command.type === "motor" && command.kind === "draw");
+  const fastArcMotor = fastArc.commands.find((command) => command.type === "motor" && command.kind === "draw");
+
+  assert.equal(slowStraightMotor.durationMs, fastStraightMotor.durationMs);
+  assert.notEqual(fastStraightMotor.durationMs, fastArcMotor.durationMs);
+});
+
 test("dead reckoning arc primitive creates one arc motor command", () => {
   const stroke = {
     raw: [
@@ -349,7 +417,7 @@ test("circle sample dead reckoning duration is scaled to half", () => {
 
   assert.ok(baseMotor);
   assert.ok(scaledMotor);
-  assert.equal(scaledMotor.durationMs, baseMotor.durationMs / 2);
+  assert.equal(scaledMotor.durationMs, Math.round((baseMotor.durationMs / 2) / 10) * 10);
 });
 
 test("cat face sample connects angled ears and forehead arc to the lower arc", () => {
