@@ -4,6 +4,8 @@
   const CONFIG_KEY = "toioPlotterConfig";
   const DEAD_SEGMENT_SETTINGS_KEY = "toioPlotterDeadSegmentSettings";
   const TURN_CALIBRATION_LOG_KEY = "toioPlotterTurnCalibrationLog";
+  const LEGEND_VISIBILITY_KEY = "toioPlotterLegendVisible";
+  const APP_LOCAL_STORAGE_KEYS = [CONFIG_KEY, DEAD_SEGMENT_SETTINGS_KEY, TURN_CALIBRATION_LOG_KEY, LEGEND_VISIBILITY_KEY];
 
   function defaultConfig() {
     return root.PlotterCore.DEFAULT_CONFIG;
@@ -117,6 +119,22 @@
     }
   }
 
+  function isBrowserReloadNavigation() {
+    const navigation = root.performance?.getEntriesByType?.("navigation")?.[0];
+    if (navigation?.type) return navigation.type === "reload";
+    return root.performance?.navigation?.type === 1;
+  }
+
+  function clearAppLocalStorage() {
+    for (const key of APP_LOCAL_STORAGE_KEYS) {
+      localStorage.removeItem(key);
+    }
+  }
+
+  function clearAppLocalStorageOnReload() {
+    if (isBrowserReloadNavigation()) clearAppLocalStorage();
+  }
+
   function saveConfig(config) {
     const saved = { ...config };
     delete saved.runMode;
@@ -175,6 +193,8 @@
   }
 
   root.ToioPlotterStorage = {
+    clearAppLocalStorage,
+    clearAppLocalStorageOnReload,
     loadConfig,
     saveConfig,
     loadDeadSegmentSettings,

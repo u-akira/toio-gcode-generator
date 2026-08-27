@@ -18,6 +18,7 @@ test.beforeEach(async ({ page }) => {
 test("run mode changes produce different generated command labels", async ({ page }) => {
   await page.goto("/");
 
+  await page.selectOption("#runMode", "position");
   await page.selectOption("#sampleSelect", "samples/json/line-1.json");
   await page.click("#simulateBtn");
 
@@ -44,4 +45,31 @@ test("run mode changes produce different generated command labels", async ({ pag
   expect(deadLabels.some((label) => label.startsWith("move: draw") || label.startsWith("move: travel"))).toBe(true);
   expect(deadLabels.some((label) => label.includes("speed:") || (label.includes("R:") && label.includes("L:")))).toBe(true);
   expect(deadLabels.some((label) => label.includes("x:") || label.includes("theta:"))).toBe(false);
+});
+
+test("command duration edits survive adding a freehand stroke", async ({ page }) => {
+  await page.goto("/");
+
+  await page.selectOption("#sampleSelect", "samples/json/line-1.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const firstDurationInput = page.locator('#toioCommandOutput input[data-command-key="durationMs"]').first();
+  await expect(firstDurationInput).toBeVisible();
+  await firstDurationInput.fill("1230");
+  await firstDurationInput.blur();
+  await expect(firstDurationInput).toHaveValue("1230");
+
+  const canvas = page.locator("#plotCanvas");
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.35);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.35, { steps: 6 });
+  await page.mouse.up();
+
+  await expect(page.locator("#simStatus")).toHaveClass(/warn/);
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  await expect(page.locator('#toioCommandOutput input[data-command-key="durationMs"]').first()).toHaveValue("1230");
 });

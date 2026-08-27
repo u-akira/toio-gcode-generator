@@ -6,6 +6,7 @@ const { Sb3Exporter } = window;
 const { distance, turnAngle, clamp, degToRad, rotatePoint, normalizeDegrees, pointInBounds } = window.ToioPlotterGeometry;
 const { formatSeconds, formatAngle, escapeHtml } = window.ToioPlotterFormatters;
 const {
+  clearAppLocalStorageOnReload,
   loadConfig,
   saveConfig,
   loadDeadSegmentSettings,
@@ -16,6 +17,8 @@ const {
   saveTurnCalibrationLog,
   clearTurnCalibrationLog: clearStoredTurnCalibrationLog,
 } = window.ToioPlotterStorage;
+
+clearAppLocalStorageOnReload();
 
 const COLORS = {
   drawing: "#202124",
@@ -257,9 +260,9 @@ const toioRunner = window.ToioPlotterRunner.createToioRunner({
   renderToioCommandOutput: () => commandEditor.renderToioCommandOutput(),
 });
 
-function resetDeadSegmentSettings() {
+function resetDeadSegmentSettings({ preserveCommandOverrides = false } = {}) {
   deadSegmentSettings = {};
-  commandOverrides = new Map();
+  if (!preserveCommandOverrides) commandOverrides = new Map();
   selectedDeadSegmentId = null;
   saveDeadSegmentSettings(deadSegmentSettings);
   renderDeadSegmentsEditor();
@@ -1056,8 +1059,9 @@ function pointerUp(event) {
     }
     activeStroke.processed = shaped.processed;
     activeStroke.primitives = shaped.primitives;
+    commandEditor.captureCommandOverrides();
     strokes.push(activeStroke);
-    resetDeadSegmentSettings();
+    resetDeadSegmentSettings({ preserveCommandOverrides: true });
     simulation = null;
     invalidateSimulation("描画を変更しました");
   }
