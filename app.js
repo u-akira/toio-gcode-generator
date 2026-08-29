@@ -675,12 +675,14 @@ function formatDeadToioCommand(command) {
   }
   if (command.type === "turn") {
     const speeds = turnWheelSpeeds(command);
-    return `move: turn ${formatAngle(command.angle)} / R:${speeds.right}, L:${speeds.left}, ${formatSeconds(command.durationMs)}`;
+    const target = command.targetSegmentId ? ` -> ${command.targetSegmentId}` : "";
+    return `move: turn${target} ${formatAngle(command.angle)} / R:${speeds.right}, L:${speeds.left}, ${formatSeconds(command.durationMs)}`;
   }
   if (command.type === "motor") {
     const label = command.kind === "draw" ? `draw ${command.geometry === "arc" ? "arc" : "straight"}` : "travel straight";
-    if (command.geometry === "arc") return `move: ${label} / R:${Math.round(command.rightSpeed)}, L:${Math.round(command.leftSpeed)}, ${formatSeconds(command.durationMs)}`;
-    return `move: ${label} / speed:${commandEditor.motorStraightSpeed(command)}, ${formatSeconds(command.durationMs)}`;
+    const target = command.targetSegmentId ? ` -> ${command.targetSegmentId}` : "";
+    if (command.geometry === "arc") return `move: ${label}${target} / R:${Math.round(command.rightSpeed)}, L:${Math.round(command.leftSpeed)}, ${formatSeconds(command.durationMs)}`;
+    return `move: ${label}${target} / speed:${commandEditor.motorStraightSpeed(command)}, ${formatSeconds(command.durationMs)}`;
   }
   if (command.type === "wait") return "wait";
   return null;

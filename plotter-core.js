@@ -57,6 +57,8 @@
   const CLOSED_ARC_SWEEP_DEG = 300;
   const CLOSED_ARC_GAP_RADIUS_RATIO = 0.35;
   const MIN_PEN_ARC_RADIUS_MM = 8;
+  const DEAD_PREVIEW_WIDTH_MM = 420;
+  const DEAD_PREVIEW_HEIGHT_MM = 297;
 
   function withDefaults(config = {}) {
     return { ...DEFAULT_CONFIG, ...config, configVersion: DEFAULT_CONFIG.configVersion };
@@ -338,7 +340,8 @@
 
       const strokeStart = stroke.processed[0];
       if (this.currentPen && distance(this.currentPen, strokeStart) >= 0.1) {
-        this.addSegment(plan, "travel", this.currentPen, strokeStart);
+        const startPose = this.firstProcessedDrawPose(stroke.processed);
+        this.addSegment(plan, "travel", this.currentPen, strokeStart, startPose ? this.optimizedTravelOptions(startPose) : {});
       }
 
       for (let i = 0; i < stroke.processed.length - 1; i += 1) {
@@ -349,12 +352,28 @@
       }
     }
 
+    firstProcessedDrawPose(points) {
+      for (let i = 0; i < points.length - 1; i += 1) {
+        const start = points[i];
+        const end = points[i + 1];
+        if (distance(start, end) >= 0.1) {
+          return {
+            point: start,
+            heading: headingBetween(start, end),
+            targetSegmentId: `seg-${this.segmentIndex + 1}`,
+          };
+        }
+      }
+      return null;
+    }
+
     addPrimitiveStroke(plan, stroke) {
       for (const primitive of stroke.primitives) {
         const primitiveStart = this.primitiveStartPoint(primitive);
         if (!primitiveStart) continue;
         if (this.currentPen && distance(this.currentPen, primitiveStart) >= 0.1) {
-          this.addSegment(plan, "travel", this.currentPen, primitiveStart);
+          const startPose = this.primitiveStartPose(primitive);
+          this.addSegment(plan, "travel", this.currentPen, primitiveStart, startPose ? this.optimizedTravelOptions(startPose) : {});
         }
         if (primitive.kind === "line") {
           const start = clonePoint(primitive.start);
@@ -381,6 +400,60 @@
       return null;
     }
 
+    primitiveStartPose(primitive) {
+      if (!primitive) return null;
+      if (primitive.kind === "line") {
+        const start = clonePoint(primitive.start);
+        const end = clonePoint(primitive.end);
+        if (!isFinitePoint(start) || !isFinitePoint(end) || distance(start, end) < 0.1) return null;
+        return {
+          point: start,
+          heading: headingBetween(start, end),
+          targetSegmentId: `seg-${this.segmentIndex + 1}`,
+        };
+      }
+      if (primitive.kind === "arc") {
+        const arc = normalizeArcPrimitive(primitive);
+        if (!arc) return null;
+        return {
+          point: cubeToPen(pointOnCircle(arc.center, arc.radius, arc.startAngle), arc.startHeading, this.config),
+          heading: arc.startHeading,
+          targetSegmentId: `seg-${this.segmentIndex + 1}`,
+        };
+      }
+      if (primitive.kind === "point") {
+        const point = clonePoint(primitive.point);
+        if (!isFinitePoint(point)) return null;
+        return {
+          point,
+          heading: null,
+          targetSegmentId: null,
+        };
+      }
+      return null;
+    }
+
+    optimizedTravelOptions(startPose) {
+      if (!this.currentCube || !startPose) return {};
+      const targetPose =
+        startPose.heading == null
+          ? pointTravelTargetPose(this.currentCube, startPose.point, this.config)
+          : {
+              cube: penToCube(startPose.point, startPose.heading, this.config),
+              heading: null,
+            };
+      if (!targetPose?.cube) return {};
+      const targetCube = targetPose.cube;
+      const commandHeading = Number.isFinite(targetPose.heading) ? targetPose.heading : headingBetween(this.currentCube, targetCube);
+      return {
+        commandStartCube: { ...this.currentCube },
+        commandEndCube: targetCube,
+        commandHeading,
+        commandEndHeading: commandHeading,
+        targetSegmentId: startPose.targetSegmentId,
+      };
+    }
+
     addPointMark(plan, primitive) {
       const point = clonePoint(primitive.point);
       if (!isFinitePoint(point)) return;
@@ -399,13 +472,13 @@
       this.currentCube = { x: cube.x, y: cube.y };
     }
 
-    addSegment(plan, kind, start, end) {
-      const segment = this.buildSegment(kind, start, end);
+    addSegment(plan, kind, start, end, options = {}) {
+      const segment = this.buildSegment(kind, start, end, options);
       plan.segments.push(segment);
       this.addSegmentCommands(plan, segment);
       this.currentPen = end;
-      this.currentHeading = segment.heading;
-      this.currentCube = segment.endCube;
+      this.currentHeading = segment.commandEndHeading ?? segment.endHeading ?? segment.heading;
+      this.currentCube = segment.commandEndCube ?? segment.endCube;
       this.segmentIndex += 1;
     }
 
@@ -420,7 +493,7 @@
       this.segmentIndex += 1;
     }
 
-    buildSegment(kind, start, end) {
+    buildSegment(kind, start, end, options = {}) {
       const config = this.config;
       const id = `seg-${this.segmentIndex}`;
       const heading = headingBetween(start, end);
@@ -436,6 +509,10 @@
       const steeringTrim = clamp(Number(saved.steeringTrim ?? 0), -80, 80);
       const startCube = penToCube(start, heading, config);
       const endCube = penToCube(end, heading, config);
+      const commandStartCube = options.commandStartCube || null;
+      const commandEndCube = options.commandEndCube || null;
+      const commandHeading = Number.isFinite(options.commandHeading) ? options.commandHeading : null;
+      const commandLengthMm = commandStartCube && commandEndCube ? distance(commandStartCube, commandEndCube) : null;
       return {
         id,
         kind,
@@ -451,7 +528,15 @@
         durationScale,
         distanceScale,
         steeringTrim,
+        targetSegmentId: options.targetSegmentId ?? null,
+        commandStartCube,
+        commandEndCube,
+        commandHeading,
+        commandEndHeading: Number.isFinite(options.commandEndHeading) ? options.commandEndHeading : commandHeading,
+        commandLengthMm,
         durationMs: computeStraightDurationMs(lengthMm, speed, baseSpeed, baseMmPerSec, durationScale * distanceScale),
+        commandDurationMs:
+          commandLengthMm == null ? null : computeStraightDurationMs(commandLengthMm, speed, baseSpeed, baseMmPerSec, durationScale * distanceScale),
         turnDurationMs: computeTurnDurationMs(turnAngleValue, config),
       };
     }
@@ -512,6 +597,10 @@
     }
 
     addSegmentCommands(plan, segment) {
+      if (segment.kind === "travel" && segment.commandStartCube && segment.commandEndCube) {
+        this.addOptimizedTravelCommands(plan, segment);
+        return;
+      }
       if (this.currentCube) {
         this.addMotorOnlyTransition(plan, segment);
       }
@@ -557,6 +646,63 @@
       }
     }
 
+    addOptimizedTravelCommands(plan, segment) {
+      const pose = {
+        ...segment.commandStartCube,
+        theta: this.currentHeading ?? segment.commandHeading ?? segment.heading,
+      };
+      const heading = segment.commandHeading ?? segment.heading;
+      const angle = signedAngleDelta(pose.theta, heading);
+      if (Math.abs(angle) >= 0.1) {
+        this.addTurnStep(plan, {
+          segment,
+          pose,
+          theta: heading,
+          label: "turn-to-travel",
+        });
+      }
+      const penEnd = cubeToPen(segment.commandEndCube, heading, this.config);
+      this.warnIfOptimizedTravelExitsPreview(plan, segment);
+      plan.commands.push({
+        type: "motor",
+        segmentId: segment.id,
+        targetSegmentId: segment.targetSegmentId,
+        kind: segment.kind,
+        geometry: segment.geometry,
+        leftSpeed: segment.speed + segment.steeringTrim,
+        rightSpeed: segment.speed - segment.steeringTrim,
+        durationMs: segment.commandDurationMs ?? segment.durationMs,
+        fromX: segment.commandStartCube.x,
+        fromY: segment.commandStartCube.y,
+        x: segment.commandEndCube.x,
+        y: segment.commandEndCube.y,
+        theta: heading,
+        startTheta: heading,
+        penX: penEnd.x,
+        penY: penEnd.y,
+        idealFromX: segment.start.x,
+        idealFromY: segment.start.y,
+        idealPenX: segment.end.x,
+        idealPenY: segment.end.y,
+      });
+      plan.stats.travelSegments += 1;
+      if (this.currentCube) plan.cubePath.push({ ...this.currentCube, theta: this.currentHeading });
+      plan.cubePath.push({ ...segment.commandStartCube, theta: heading }, { ...segment.commandEndCube, theta: heading });
+    }
+
+    warnIfOptimizedTravelExitsPreview(plan, segment) {
+      const centerX = (MAT.minX + MAT.maxX) / 2;
+      const centerY = (MAT.minY + MAT.maxY) / 2;
+      const bounds = {
+        minX: centerX - DEAD_PREVIEW_WIDTH_MM / 2,
+        maxX: centerX + DEAD_PREVIEW_WIDTH_MM / 2,
+        minY: centerY - DEAD_PREVIEW_HEIGHT_MM / 2,
+        maxY: centerY + DEAD_PREVIEW_HEIGHT_MM / 2,
+      };
+      if (pointInBounds(segment.commandStartCube, bounds) && pointInBounds(segment.commandEndCube, bounds)) return;
+      plan.warnings.push(`${segment.id} travel がA3プレビュー範囲外を通る可能性があります。広いスペースで実行してください。`);
+    }
+
     addMotorOnlyTransition(plan, segment) {
       const currentHeading = this.currentHeading ?? segment.heading;
       let pose = { ...this.currentCube, theta: currentHeading };
@@ -592,6 +738,7 @@
         type: "turn",
         role: label,
         segmentId: segment.id,
+        targetSegmentId: segment.targetSegmentId,
         angle,
         leftSpeed: speeds.left,
         rightSpeed: speeds.right,
@@ -692,6 +839,32 @@
     return {
       left: Math.round(direction * clamp(base + trim, 0, 255)),
       right: Math.round(-direction * clamp(base - trim, 0, 255)),
+    };
+  }
+
+  function pointTravelTargetPose(fromCube, point, configInput = {}) {
+    if (!isFinitePoint(fromCube) || !isFinitePoint(point)) return null;
+    const config = withDefaults(configInput);
+    const offset = {
+      x: Number(config.penOffsetX || 0) + Number(config.rotationCenterOffsetX || 0),
+      y: Number(config.penOffsetY || 0) + Number(config.rotationCenterOffsetY || 0),
+    };
+    let heading = headingBetween(fromCube, point);
+    for (let i = 0; i < 8; i += 1) {
+      const cube = {
+        x: point.x - rotatePoint(offset, heading).x,
+        y: point.y - rotatePoint(offset, heading).y,
+      };
+      const nextHeading = headingBetween(fromCube, cube);
+      if (Math.abs(signedAngleDelta(heading, nextHeading)) < 0.001) return { cube, heading: nextHeading };
+      heading = nextHeading;
+    }
+    return {
+      cube: {
+        x: point.x - rotatePoint(offset, heading).x,
+        y: point.y - rotatePoint(offset, heading).y,
+      },
+      heading,
     };
   }
 

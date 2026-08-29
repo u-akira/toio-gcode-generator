@@ -601,6 +601,35 @@ test("dead reckoning travel distance scale shortens pen-up travel only", () => {
   assert.equal(shortenedDraw.durationMs, baseDraw.durationMs);
 });
 
+test("dead reckoning recalculates pen-up travel directly to the next draw start", () => {
+  const strokes = [
+    makeStroke([
+      [180, 225],
+      [320, 225],
+    ]),
+    makeStroke([
+      [180, 275],
+      [320, 275],
+    ]),
+  ];
+  const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: -48, penOffsetY: 0 })).plan(strokes);
+  const travelMotor = result.commands.find((command) => command.type === "motor" && command.kind === "travel" && command.segmentId === "seg-1");
+  const travelTurns = result.commands.filter((command) => command.type === "turn" && command.segmentId === "seg-1");
+  const drawTurn = result.commands.find((command) => command.type === "turn" && command.segmentId === "seg-2" && command.role === "turn-to-draw");
+
+  assert.ok(travelMotor);
+  assert.equal(travelMotor.targetSegmentId, "seg-2");
+  assert.equal(travelMotor.fromX, result.segments[0].endCube.x);
+  assert.equal(travelMotor.fromY, result.segments[0].endCube.y);
+  assert.equal(travelMotor.x, result.segments[2].startCube.x);
+  assert.equal(travelMotor.y, result.segments[2].startCube.y);
+  assert.deepEqual(
+    travelTurns.map((command) => command.role),
+    ["turn-to-travel"],
+  );
+  assert.ok(drawTurn);
+});
+
 test("dead reckoning changes draw direction with motor-only transition steps", () => {
   const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: -48, penOffsetY: 0 })).plan([
     makeStroke([
@@ -735,6 +764,10 @@ test("stack-chan sample marks eyes with one second pen-down waits", () => {
     assert.equal(result.commands[index - 1].state, "down");
     assert.equal(result.commands[index + 1].type, "pen");
     assert.equal(result.commands[index + 1].state, "up");
+    const previousMotor = result.commands.slice(0, index - 1).findLast((command) => command.type === "motor");
+    assert.ok(previousMotor);
+    assert.ok(Math.abs(previousMotor.penX - result.commands[index - 1].penX) < 0.001);
+    assert.ok(Math.abs(previousMotor.penY - result.commands[index - 1].penY) < 0.001);
   }
 });
 
