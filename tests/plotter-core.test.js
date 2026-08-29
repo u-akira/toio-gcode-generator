@@ -417,6 +417,7 @@ test("circle sample dead reckoning duration is scaled to half", () => {
 
   assert.ok(baseMotor);
   assert.ok(scaledMotor);
+  assert.equal(scaledMotor.durationMs, 7400);
   assert.equal(scaledMotor.durationMs, Math.round((baseMotor.durationMs / 2) / 10) * 10);
 });
 

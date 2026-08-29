@@ -43,7 +43,7 @@
     deadTurnBalanceTrim: 0,
     deadTurnMsPer90: 990,
     deadMmPerSecAtDrawSpeed: 56,
-    deadArcMmPerSecAtDrawSpeed: 30,
+    deadArcMmPerSecAtDrawSpeed: 29.72,
     deadMmPerSecAtTravelSpeed: 70,
     deadTravelDistanceScale: 1,
     deadWheelBaseMm: 26,
