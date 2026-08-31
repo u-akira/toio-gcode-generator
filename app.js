@@ -34,6 +34,9 @@ const COLORS = {
 };
 
 const PLAY_MAT_IMAGE_SRC = "image/playmat-position-id-01.png";
+const DEFAULT_CANVAS_HINT = "ドラッグで描画。安全領域の内側に線を描いてください。";
+const CANVAS_WARNING_MS = 5000;
+const PEN_CHECK_HOLD_MS = 700;
 const POSITION_FRESH_MS = 500;
 const POSITION_HOLD_MS = 1500;
 const POSITION_RUN_TIMEOUT_MS = 1000;
@@ -45,6 +48,7 @@ const MIN_TURN_DURATION_MS = 150;
 
 const els = {
   canvas: document.getElementById("plotCanvas"),
+  canvasHint: document.getElementById("canvasHint"),
   simStatus: document.getElementById("simStatus"),
   runStatus: document.getElementById("runStatus"),
   messageLog: document.getElementById("messageLog"),
@@ -64,8 +68,8 @@ const els = {
   runBtn: document.getElementById("runBtn"),
   sb3ExportBtn: document.getElementById("sb3ExportBtn"),
   stopBtn: document.getElementById("stopBtn"),
-  penUpBtn: document.getElementById("penUpBtn"),
-  penDownBtn: document.getElementById("penDownBtn"),
+  redoBtn: document.getElementById("redoBtn"),
+  penCheckBtn: document.getElementById("penCheckBtn"),
   legendToggleBtn: document.getElementById("legendToggleBtn"),
   runMode: document.getElementById("runMode"),
   deadSegmentsEditor: document.getElementById("deadSegmentsEditor"),
@@ -119,6 +123,7 @@ const ctx = els.canvas.getContext("2d");
 let resetTurnCalibrationLogOnLoad = true;
 let config = loadConfig();
 let strokes = [];
+let redoStack = [];
 let activeStroke = null;
 let simulation = null;
 let simulationValid = false;
@@ -137,6 +142,7 @@ let lastMovePoseUiAt = 0;
 let movePoseUiTimer = null;
 let canvasResizeObserver = null;
 let legendVisible = localStorage.getItem("toioPlotterLegendVisible") !== "false";
+let canvasHintTimer = null;
 
 const playMatImage = new Image();
 playMatImage.onload = () => {
@@ -328,6 +334,13 @@ function updateSb3ExportButton() {
 
 function syncRunButton() {
   els.runBtn.disabled = toioRunner.isRunning() || !simulationValid || !hasRequiredToioConnection();
+  els.penCheckBtn.disabled = toioRunner.isRunning() || !isCubeConnected(penCube);
+}
+
+function syncDrawingButtons() {
+  els.undoBtn.disabled = !strokes.length;
+  els.redoBtn.disabled = !redoStack.length;
+  els.clearBtn.disabled = !strokes.length && !activeStroke;
 }
 
 function hasRequiredToioConnection() {
@@ -352,6 +365,20 @@ function setPill(el, text, cls = "") {
 function log(message) {
   const now = new Date().toLocaleTimeString("ja-JP", { hour12: false });
   els.messageLog.textContent = `[${now}] ${message}\n${els.messageLog.textContent}`.slice(0, 1800);
+}
+
+function setCanvasHint(message = DEFAULT_CANVAS_HINT, cls = "") {
+  if (canvasHintTimer) {
+    window.clearTimeout(canvasHintTimer);
+    canvasHintTimer = null;
+  }
+  els.canvasHint.textContent = message;
+  els.canvasHint.className = `canvas-hint ${cls}`.trim();
+}
+
+function warnCanvasHint(message) {
+  setCanvasHint(message, "warn");
+  canvasHintTimer = window.setTimeout(() => setCanvasHint(), CANVAS_WARNING_MS);
 }
 
 function resizeCanvasBackingStore() {
@@ -390,6 +417,7 @@ function safeBounds() {
 }
 
 function draw() {
+  syncDrawingButtons();
   canvasRenderer.draw({ playMatImageLoaded });
 }
 
@@ -439,7 +467,10 @@ function runSimulation() {
   commandEditor.captureCommandOverrides();
   simulation = createSimulation();
   commandEditor.applyCommandOverrides();
-  if (!isDeadMode()) strokes = simulation.processedStrokes;
+  if (!isDeadMode()) {
+    strokes = simulation.processedStrokes;
+    redoStack = [];
+  }
   if (!simulation.commands.length) {
     simulationValid = false;
     selectedDeadSegmentId = null;
@@ -460,7 +491,7 @@ function runSimulation() {
     const stats = simulation.stats;
     if (isDeadMode()) {
       log(
-        `Dead reckoning シミュレーション成功: ${simulation.segments.length} segments, ` +
+        `Motor timing シミュレーション成功: ${simulation.segments.length} segments, ` +
           `${stats.drawSegments} draw, ${stats.travelSegments} travel, ` +
           `points ${stats.rawPoints} -> ${stats.processedPoints}${warn}`,
       );
@@ -484,7 +515,10 @@ function buildImportedSimulation(reason) {
   stopSimulationAnimation();
   simulation = createSimulation();
   commandEditor.applyCommandOverrides();
-  if (!isDeadMode()) strokes = simulation.processedStrokes;
+  if (!isDeadMode()) {
+    strokes = simulation.processedStrokes;
+    redoStack = [];
+  }
   const hasErrors = simulation.errors.length > 0;
   simulationValid = !hasErrors && simulation.commands.length > 0;
   if (simulationValid && isDeadMode() && !getSelectedDeadSegment()) selectFirstDeadDrawSegment();
@@ -533,7 +567,7 @@ function buildCommandReportText() {
   if (!simulationValid || !simulation?.commands?.length) return "";
   const lines = [
     "toio plotter calibration report",
-    `mode: ${isDeadMode() ? "dead reckoning" : "position id"}`,
+    `mode: ${isDeadMode() ? "motor timing" : "position id"}`,
     "",
     "settings:",
     `drawSpeed: ${config.drawSpeed}`,
@@ -624,7 +658,7 @@ function getAnimatedCommands() {
 function renderDeadSegmentsEditor() {
   if (!els.deadSegmentsEditor) return;
   if (!isDeadMode()) {
-    els.deadSegmentsEditor.innerHTML = `<div class="segment-empty">Dead reckoning モードでシミュレーションすると調整できます。</div>`;
+    els.deadSegmentsEditor.innerHTML = `<div class="segment-empty">Motor timing モードでシミュレーションすると調整できます。</div>`;
     return;
   }
   const segments = getDeadSegments();
@@ -887,6 +921,19 @@ async function setPen(state, command = null) {
   await toioRunner.setPen(state, command);
 }
 
+async function runPenCheck() {
+  if (toioRunner.isRunning()) {
+    log("toio 実行中は Pen Check できません。");
+    return;
+  }
+  log("Pen check: up -> down -> up");
+  await setPen("up");
+  await setPen("down");
+  await sleep(PEN_CHECK_HOLD_MS);
+  await setPen("up");
+  log("Pen check completed.");
+}
+
 async function runMoveCommandWithPositionRetry(command, nativePoint) {
   await toioRunner.runMoveCommandWithPositionRetry(command, nativePoint);
 }
@@ -941,11 +988,11 @@ function exportDrawing() {
 
 async function exportSb3() {
   if (!isDeadMode()) {
-    log("toio do export は Dead reckoning モードのシミュレーション結果だけに対応しています。");
+    log("toio do export は Motor timing モードのシミュレーション結果だけに対応しています。");
     return;
   }
   if (!simulationValid || !simulation?.commands?.length) {
-    log("toio do export の前に Dead reckoning で Simulate してください。");
+    log("toio do export の前に Motor timing で Simulate してください。");
     return;
   }
   if (!Sb3Exporter) {
@@ -992,6 +1039,7 @@ async function importDrawing(file) {
 
 function importDrawingPayload(payload, reason, options = { preservePenOffset: true }) {
   strokes = Array.isArray(payload.strokes) ? payload.strokes : [];
+  redoStack = [];
   deadSegmentSettings = payload.deadSegmentSettings && typeof payload.deadSegmentSettings === "object" ? payload.deadSegmentSettings : {};
   commandOverrides = loadCommandOverrides(payload.commandOverrides);
   selectedDeadSegmentId = null;
@@ -1028,6 +1076,7 @@ async function loadSelectedSample() {
 
 function pointerDown(event) {
   event.preventDefault();
+  setCanvasHint();
   const clickedSegment = findClickedDrawSegment(event);
   if (clickedSegment) {
     selectDeadSegment(clickedSegment.id);
@@ -1051,10 +1100,16 @@ function pointerMove(event) {
 function pointerUp(event) {
   if (!activeStroke) return;
   event.preventDefault();
-  if (activeStroke.raw.length > 1) {
+  if (activeStroke.raw.length <= 1) {
+    const message = "線が短すぎます。ドラッグして描画してください。";
+    log(message);
+    warnCanvasHint(message);
+  } else {
     const shaped = processFreehandStroke(activeStroke.raw);
     if (shaped.error) {
-      log(`円弧として補正できませんでした: ${shaped.error} 描いた線をクリアしました。`);
+      const message = `補正できませんでした: ${shaped.error} 描いた線をクリアしました。`;
+      log(message);
+      warnCanvasHint(message);
       activeStroke = null;
       draw();
       return;
@@ -1062,6 +1117,7 @@ function pointerUp(event) {
     activeStroke.processed = shaped.processed;
     activeStroke.primitives = shaped.primitives;
     commandEditor.captureCommandOverrides();
+    redoStack = [];
     strokes.push(activeStroke);
     resetDeadSegmentSettings({ preserveCommandOverrides: true });
     simulation = null;
@@ -1261,14 +1317,25 @@ function bindEvents() {
   els.legendToggleBtn.addEventListener("click", toggleLegend);
 
   els.undoBtn.addEventListener("click", () => {
-    strokes.pop();
+    const stroke = strokes.pop();
+    if (stroke) redoStack.push(stroke);
     resetDeadSegmentSettings();
     simulation = null;
     invalidateSimulation("Undo");
     draw();
   });
+  els.redoBtn.addEventListener("click", () => {
+    const stroke = redoStack.pop();
+    if (!stroke) return;
+    strokes.push(stroke);
+    resetDeadSegmentSettings();
+    simulation = null;
+    invalidateSimulation("Redo");
+    draw();
+  });
   els.clearBtn.addEventListener("click", () => {
     strokes = [];
+    redoStack = [];
     activeStroke = null;
     resetDeadSegmentSettings();
     simulation = null;
@@ -1315,8 +1382,7 @@ function bindEvents() {
   els.clearTurnLogBtn?.addEventListener("click", clearTurnCalibrationLog);
   els.runBtn.addEventListener("click", () => runToio());
   els.stopBtn.addEventListener("click", () => emergencyStop());
-  els.penUpBtn.addEventListener("click", () => setPen("up").then(() => log("Pen up")).catch((error) => log(error.message)));
-  els.penDownBtn.addEventListener("click", () => setPen("down").then(() => log("Pen down")).catch((error) => log(error.message)));
+  els.penCheckBtn.addEventListener("click", () => runPenCheck().catch((error) => log(error.message)));
 
   els.connectMoveBtn.addEventListener("click", async () => {
     let cube = null;
@@ -1359,10 +1425,13 @@ function bindEvents() {
 
 function init() {
   syncConfigToForm();
+  setCanvasHint();
   syncLegendToggle();
   renderDeadSegmentsEditor();
   commandEditor.renderToioCommandOutput();
   renderTurnCalibration();
+  syncDrawingButtons();
+  syncRunButton();
   updateSb3ExportButton();
   bindEvents();
   window.setInterval(refreshMovePoseStatus, POSITION_UI_REFRESH_MS);

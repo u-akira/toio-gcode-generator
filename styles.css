@@ -93,6 +93,10 @@ button.danger {
   border-bottom: 1px solid var(--line);
 }
 
+.title-block {
+  min-width: 240px;
+}
+
 h1,
 h2,
 p {
@@ -114,6 +118,71 @@ h2 {
   color: var(--muted);
   font-size: 13px;
   margin-top: 5px;
+}
+
+.topbar-controls {
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+  min-width: 0;
+}
+
+.toio-status-strip,
+.toio-connect-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.toio-status-item {
+  display: inline-grid;
+  grid-template-columns: auto minmax(58px, auto);
+  align-items: center;
+  min-height: 28px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.toio-status-label {
+  padding: 4px 7px 4px 9px;
+  color: var(--muted);
+}
+
+.toio-status-value {
+  min-width: 0;
+  max-width: 148px;
+  overflow: hidden;
+  padding: 4px 9px 4px 7px;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toio-status-value.connected {
+  color: var(--ok);
+  background: #f1fbf3;
+}
+
+.toio-status-value.connecting {
+  color: var(--warn);
+  background: #fff8e6;
+}
+
+.toio-status-value.disconnected {
+  color: var(--danger);
+  background: #fff4f4;
+  font-weight: 700;
+}
+
+.toio-connect-actions button {
+  min-height: 28px;
+  padding: 4px 9px;
+  font-size: 12px;
+  line-height: 1;
 }
 
 .status-row {
@@ -175,8 +244,10 @@ h2 {
 
 .canvas-hint {
   position: absolute;
-  left: 34px;
-  bottom: 34px;
+  left: 214px;
+  right: 230px;
+  top: 30px;
+  min-height: 30px;
   padding: 5px 8px;
   background: rgba(255, 255, 255, 0.9);
   color: var(--muted);
@@ -184,6 +255,45 @@ h2 {
   border-radius: 6px;
   font-size: 12px;
   pointer-events: none;
+  display: flex;
+  align-items: center;
+}
+
+.canvas-hint.warn {
+  background: rgba(255, 248, 230, 0.96);
+  border-color: #e4c27f;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.canvas-tools {
+  position: absolute;
+  top: 30px;
+  left: 34px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 1;
+}
+
+.canvas-tool-group {
+  display: flex;
+  gap: 6px;
+}
+
+.canvas-tools button {
+  min-height: 30px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.94);
+  border-color: var(--line);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.canvas-tools button.danger {
+  background: rgba(255, 247, 247, 0.95);
+  border-color: #de9a9a;
 }
 
 .legend-toggle {
@@ -248,6 +358,23 @@ h2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.import-grid {
+  grid-template-columns: 1fr;
+}
+
+.simulation-actions {
+  grid-template-columns: 1fr;
+  margin-bottom: 10px;
+}
+
+.position-status-item .toio-status-value {
+  max-width: 190px;
+}
+
+.pen-check-button {
+  grid-column: 1 / -1;
 }
 
 .sample-row {
@@ -397,14 +524,47 @@ h2 {
 
 .toio-command-panel {
   margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
 }
 
+.command-save-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.command-save-row button {
+  width: 100%;
+}
+
+.detail-panel,
 .turn-calibration-panel {
+  display: block;
+}
+
+.detail-panel summary,
+.turn-calibration-panel summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.detail-panel-body {
+  display: grid;
+  gap: 8px;
   margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
+}
+
+.detail-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.detail-toolbar button {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 .turn-calibration-output {

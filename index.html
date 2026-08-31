@@ -10,28 +10,64 @@
     <main class="app-shell">
       <section class="stage">
         <header class="topbar">
-          <div>
+          <div class="title-block">
             <h1>toio Pen Plotter</h1>
             <p>A3 簡易プレイマット中心基準のフリーハンド線画ワークベンチ</p>
           </div>
-          <div class="status-row">
-            <span id="simStatus" class="status-pill warn">未シミュレーション</span>
-            <span id="runStatus" class="status-pill">待機中</span>
+          <div class="topbar-controls">
+            <div class="toio-status-strip" aria-label="toio 接続状態">
+              <div class="toio-status-item">
+                <span class="toio-status-label">移動</span>
+                <span id="moveCubeState" class="toio-status-value">未接続</span>
+              </div>
+              <div class="toio-status-item">
+                <span class="toio-status-label">ペン</span>
+                <span id="penCubeState" class="toio-status-value">未接続</span>
+              </div>
+              <div class="toio-status-item position-status-item">
+                <span class="toio-status-label">位置</span>
+                <span id="positionState" class="toio-status-value">未取得</span>
+              </div>
+            </div>
+            <div class="toio-connect-actions">
+              <button id="connectMoveBtn" type="button">移動 接続</button>
+              <button id="connectPenBtn" type="button">ペン 接続</button>
+              <button id="swapRolesBtn" type="button">入替</button>
+            </div>
+            <div class="status-row">
+              <span id="simStatus" class="status-pill warn">未シミュレーション</span>
+              <span id="runStatus" class="status-pill">待機中</span>
+            </div>
           </div>
         </header>
 
         <div class="canvas-wrap">
           <canvas id="plotCanvas" width="1100" height="780"></canvas>
+          <div class="canvas-tools" aria-label="描画操作">
+            <div class="canvas-tool-group">
+              <button id="undoBtn" type="button">Undo</button>
+              <button id="redoBtn" type="button">Redo</button>
+            </div>
+            <button id="clearBtn" type="button" class="danger">Clear</button>
+          </div>
           <button id="legendToggleBtn" class="legend-toggle" type="button" aria-controls="plotCanvas" aria-expanded="true">
             <span>Legend</span>
           </button>
-          <div class="canvas-hint">ドラッグで描画。安全領域の内側に線を描いてください。</div>
+          <div id="canvasHint" class="canvas-hint">ドラッグで描画。安全領域の内側に線を描いてください。</div>
         </div>
       </section>
 
       <aside class="control-panel" aria-label="操作パネル">
         <section class="panel-section">
           <h2>描画</h2>
+          <div class="form-grid mode-grid">
+            <label>実行モード
+              <select id="runMode">
+                <option value="position">Position ID</option>
+                <option value="dead">Motor timing</option>
+              </select>
+            </label>
+          </div>
           <div class="sample-row">
             <select id="sampleSelect" aria-label="サンプル図形">
               <option value="">サンプルを選択</option>
@@ -50,10 +86,7 @@
             </select>
             <button id="loadSampleBtn" type="button">Load</button>
           </div>
-          <div class="button-grid">
-            <button id="undoBtn" type="button">Undo</button>
-            <button id="clearBtn" type="button">Clear</button>
-            <button id="exportBtn" type="button">JSON Export</button>
+          <div class="button-grid import-grid">
             <label class="file-button">
               JSON Import
               <input id="importInput" type="file" accept="application/json" />
@@ -62,46 +95,9 @@
         </section>
 
         <section class="panel-section">
-          <h2>toio 接続</h2>
-          <div class="button-grid">
-            <button id="connectMoveBtn" type="button">移動用 接続</button>
-            <button id="connectPenBtn" type="button">昇降用 接続</button>
-            <button id="swapRolesBtn" type="button">役割入替</button>
-          </div>
-          <dl class="mini-log">
-            <div><dt>移動用</dt><dd id="moveCubeState">未接続</dd></div>
-            <div><dt>昇降用</dt><dd id="penCubeState">未接続</dd></div>
-            <div><dt>Position ID</dt><dd id="positionState">未取得</dd></div>
-          </dl>
-        </section>
-
-        <section class="panel-section">
-          <h2>実行</h2>
-          <div class="form-grid mode-grid">
-            <label>実行モード
-              <select id="runMode">
-                <option value="position">Position ID</option>
-                <option value="dead">Dead reckoning</option>
-              </select>
-            </label>
-          </div>
-          <div class="button-grid">
+          <h2>シミュレーション</h2>
+          <div class="button-grid simulation-actions">
             <button id="simulateBtn" type="button" class="primary">Simulate</button>
-            <button id="runBtn" type="button" disabled>Run toio</button>
-            <button id="sb3ExportBtn" type="button" disabled>toio do export</button>
-            <button id="stopBtn" type="button" class="danger">Emergency Stop</button>
-            <button id="penUpBtn" type="button">Pen Up</button>
-            <button id="penDownBtn" type="button">Pen Down</button>
-          </div>
-          <div class="selected-segment-panel" hidden>
-            <div class="selected-segment-header">
-              <h3>選択線分調整</h3>
-              <div class="segment-nav">
-                <button id="prevSegmentBtn" type="button">前へ</button>
-                <button id="nextSegmentBtn" type="button">次へ</button>
-              </div>
-            </div>
-            <div id="deadSegmentsEditor" class="segment-editor"></div>
           </div>
           <div class="toio-command-panel">
             <div class="selected-segment-header">
@@ -114,59 +110,94 @@
               <button id="simNextStepBtn" type="button" disabled>Next</button>
             </div>
             <div id="toioCommandOutput" class="toio-command-output"></div>
+            <div class="command-save-row">
+              <button id="exportBtn" type="button">JSON Export</button>
+              <button id="sb3ExportBtn" type="button" disabled>toio do export</button>
+            </div>
           </div>
-          <div class="turn-calibration-panel">
+        </section>
+
+        <details class="panel-section detail-panel">
+          <summary>キャリブレーション</summary>
+          <div class="detail-panel-body">
+            <div class="form-grid">
+              <label>安全領域<input id="safeScale" type="number" min="0.5" max="1" step="0.01" /></label>
+              <label>初期向き °<input id="fixedHeading" type="number" min="0" max="359" step="1" /></label>
+              <label>ペン前後 X<input id="penOffsetX" type="number" step="1" /></label>
+              <label>ペン左右 Y<input id="penOffsetY" type="number" step="1" /></label>
+              <label>回転中心 X<input id="rotationCenterOffsetX" type="number" step="1" /></label>
+              <label>回転中心 Y<input id="rotationCenterOffsetY" type="number" step="1" /></label>
+              <label>描画速度<input id="drawSpeed" type="number" min="10" max="255" step="1" /></label>
+              <label>移動速度<input id="travelSpeed" type="number" min="10" max="255" step="1" /></label>
+              <label>回転速度<input id="deadTurnSpeed" type="number" min="1" max="255" step="1" /></label>
+              <label>回転補正<input id="deadTurnBalanceTrim" type="number" min="-80" max="80" step="1" /></label>
+              <label>90度回転ms<input id="deadTurnMsPer90" type="number" min="150" max="2550" step="10" /></label>
+              <label>直線描画 mm/s<input id="deadMmPerSecAtDrawSpeed" type="number" min="1" max="200" step="1" /></label>
+              <label>円弧描画 mm/s<input id="deadArcMmPerSecAtDrawSpeed" type="number" min="1" max="200" step="0.01" /></label>
+              <label>移動 mm/s<input id="deadMmPerSecAtTravelSpeed" type="number" min="1" max="200" step="1" /></label>
+              <label>Pen up距離倍率<input id="deadTravelDistanceScale" type="number" min="0.1" max="2" step="0.05" /></label>
+              <label>Wheel base mm<input id="deadWheelBaseMm" type="number" min="1" max="80" step="1" /></label>
+              <label>平滑化<input id="smoothing" type="number" min="0" max="1" step="0.05" /></label>
+              <label>点間隔<input id="minPointDistance" type="number" min="1" max="30" step="1" /></label>
+              <label>角検出 °<input id="cornerAngle" type="number" min="10" max="120" step="1" /></label>
+              <label>形状補正<input id="lineCorrection" type="number" min="0" max="1" step="1" /></label>
+              <label>補正強度<input id="lineTolerance" type="number" min="0" max="40" step="1" /></label>
+              <label>最小線分<input id="minSegmentLength" type="number" min="0" max="80" step="1" /></label>
+              <label>Timeout 秒<input id="targetTimeout" type="number" min="1" max="20" step="1" /></label>
+            </div>
+          </div>
+        </details>
+
+        <details class="panel-section detail-panel">
+          <summary>ペン昇降</summary>
+          <div class="detail-panel-body">
+            <div class="form-grid">
+              <label>Up 速度<input id="upMotorSpeed" type="number" min="-255" max="255" step="1" /></label>
+              <label>Up ms<input id="upDurationMs" type="number" min="10" max="2550" step="10" /></label>
+              <label>Down 速度<input id="downMotorSpeed" type="number" min="-255" max="255" step="1" /></label>
+              <label>Down ms<input id="downDurationMs" type="number" min="10" max="2550" step="10" /></label>
+              <label>昇降方式<input id="penMotorMode" type="number" min="0" max="1" step="1" /></label>
+              <label>待ち ms<input id="settleMs" type="number" min="0" max="2000" step="10" /></label>
+            </div>
+          </div>
+        </details>
+
+        <section class="panel-section">
+          <h2>実行</h2>
+          <div class="button-grid">
+            <button id="penCheckBtn" type="button" class="pen-check-button" disabled>Pen Check</button>
+            <button id="runBtn" type="button" disabled>Run toio</button>
+            <button id="stopBtn" type="button" class="danger">Emergency Stop</button>
+          </div>
+          <div class="selected-segment-panel" hidden>
             <div class="selected-segment-header">
-              <h3>回転テストログ</h3>
+              <h3>選択線分調整</h3>
               <div class="segment-nav">
-                <button id="clearTurnLogBtn" type="button">Clear</button>
+                <button id="prevSegmentBtn" type="button">前へ</button>
+                <button id="nextSegmentBtn" type="button">次へ</button>
               </div>
+            </div>
+            <div id="deadSegmentsEditor" class="segment-editor"></div>
+          </div>
+        </section>
+
+        <details class="panel-section detail-panel log-detail-panel">
+          <summary>ログ</summary>
+          <div class="detail-panel-body">
+            <div id="messageLog" class="message-log" role="status" aria-live="polite"></div>
+          </div>
+        </details>
+
+        <details class="panel-section turn-calibration-panel">
+          <summary>回転テストログ</summary>
+          <div class="detail-panel-body">
+            <div class="detail-toolbar">
+              <button id="clearTurnLogBtn" type="button">Clear</button>
             </div>
             <div id="turnCalibrationOutput" class="turn-calibration-output"></div>
           </div>
-          <div id="messageLog" class="message-log" role="status" aria-live="polite"></div>
-        </section>
+        </details>
 
-        <section class="panel-section">
-          <h2>キャリブレーション</h2>
-          <div class="form-grid">
-            <label>安全領域<input id="safeScale" type="number" min="0.5" max="1" step="0.01" /></label>
-            <label>初期向き °<input id="fixedHeading" type="number" min="0" max="359" step="1" /></label>
-            <label>ペン前後 X<input id="penOffsetX" type="number" step="1" /></label>
-            <label>ペン左右 Y<input id="penOffsetY" type="number" step="1" /></label>
-            <label>回転中心 X<input id="rotationCenterOffsetX" type="number" step="1" /></label>
-            <label>回転中心 Y<input id="rotationCenterOffsetY" type="number" step="1" /></label>
-            <label>描画速度<input id="drawSpeed" type="number" min="10" max="255" step="1" /></label>
-            <label>移動速度<input id="travelSpeed" type="number" min="10" max="255" step="1" /></label>
-            <label>回転速度<input id="deadTurnSpeed" type="number" min="1" max="255" step="1" /></label>
-            <label>回転補正<input id="deadTurnBalanceTrim" type="number" min="-80" max="80" step="1" /></label>
-            <label>90度回転ms<input id="deadTurnMsPer90" type="number" min="150" max="2550" step="10" /></label>
-            <label>直線描画 mm/s<input id="deadMmPerSecAtDrawSpeed" type="number" min="1" max="200" step="1" /></label>
-            <label>円弧描画 mm/s<input id="deadArcMmPerSecAtDrawSpeed" type="number" min="1" max="200" step="0.01" /></label>
-            <label>移動 mm/s<input id="deadMmPerSecAtTravelSpeed" type="number" min="1" max="200" step="1" /></label>
-            <label>Pen up距離倍率<input id="deadTravelDistanceScale" type="number" min="0.1" max="2" step="0.05" /></label>
-            <label>Wheel base mm<input id="deadWheelBaseMm" type="number" min="1" max="80" step="1" /></label>
-            <label>平滑化<input id="smoothing" type="number" min="0" max="1" step="0.05" /></label>
-            <label>点間隔<input id="minPointDistance" type="number" min="1" max="30" step="1" /></label>
-            <label>角検出 °<input id="cornerAngle" type="number" min="10" max="120" step="1" /></label>
-            <label>形状補正<input id="lineCorrection" type="number" min="0" max="1" step="1" /></label>
-            <label>補正強度<input id="lineTolerance" type="number" min="0" max="40" step="1" /></label>
-            <label>最小線分<input id="minSegmentLength" type="number" min="0" max="80" step="1" /></label>
-            <label>Timeout 秒<input id="targetTimeout" type="number" min="1" max="20" step="1" /></label>
-          </div>
-        </section>
-
-        <section class="panel-section">
-          <h2>ペン昇降</h2>
-          <div class="form-grid">
-            <label>Up 速度<input id="upMotorSpeed" type="number" min="-255" max="255" step="1" /></label>
-            <label>Up ms<input id="upDurationMs" type="number" min="10" max="2550" step="10" /></label>
-            <label>Down 速度<input id="downMotorSpeed" type="number" min="-255" max="255" step="1" /></label>
-            <label>Down ms<input id="downDurationMs" type="number" min="10" max="2550" step="10" /></label>
-            <label>昇降方式<input id="penMotorMode" type="number" min="0" max="1" step="1" /></label>
-            <label>待ち ms<input id="settleMs" type="number" min="0" max="2000" step="10" /></label>
-          </div>
-        </section>
       </aside>
     </main>
 

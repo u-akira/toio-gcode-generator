@@ -73,3 +73,77 @@ test("command duration edits survive adding a freehand stroke", async ({ page })
   await expect(page.locator("#simStatus")).toHaveClass(/ok/);
   await expect(page.locator('#toioCommandOutput input[data-command-key="durationMs"]').first()).toHaveValue("1230");
 });
+
+test("canvas drawing toolbar supports undo and redo", async ({ page }) => {
+  await page.goto("/");
+
+  const canvas = page.locator("#plotCanvas");
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+
+  await expect(page.locator("#undoBtn")).toBeDisabled();
+  await expect(page.locator("#redoBtn")).toBeDisabled();
+  await expect(page.locator("#clearBtn")).toBeDisabled();
+
+  await page.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.35);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.35, { steps: 6 });
+  await page.mouse.up();
+
+  await expect(page.locator("#undoBtn")).toBeEnabled();
+  await expect(page.locator("#redoBtn")).toBeDisabled();
+  await expect(page.locator("#clearBtn")).toBeEnabled();
+
+  await page.click("#undoBtn");
+  await expect(page.locator("#undoBtn")).toBeDisabled();
+  await expect(page.locator("#redoBtn")).toBeEnabled();
+  await expect(page.locator("#clearBtn")).toBeDisabled();
+
+  await page.click("#redoBtn");
+  await expect(page.locator("#undoBtn")).toBeEnabled();
+  await expect(page.locator("#redoBtn")).toBeDisabled();
+  await expect(page.locator("#clearBtn")).toBeEnabled();
+
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+});
+
+test("canvas hint shows drawing failure feedback near the drawing area", async ({ page }) => {
+  await page.goto("/");
+
+  const canvas = page.locator("#plotCanvas");
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+
+  await page.mouse.click(box.x + box.width * 0.45, box.y + box.height * 0.45);
+
+  await expect(page.locator("#canvasHint")).toHaveClass(/warn/);
+  await expect(page.locator("#canvasHint")).toContainText("線が短すぎます");
+  await expect(page.locator("#messageLog")).toContainText("線が短すぎます");
+});
+
+test("execution prep controls stay separate from turn calibration details", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.locator("#penCheckBtn")).toBeDisabled();
+  await expect(page.locator("details.turn-calibration-panel")).not.toHaveAttribute("open", "");
+  await expect(page.locator("details.detail-panel")).toHaveCount(3);
+  await expect(page.locator("details.detail-panel").nth(0)).not.toHaveAttribute("open", "");
+  await expect(page.locator("details.detail-panel").nth(1)).not.toHaveAttribute("open", "");
+  await expect(page.locator("details.detail-panel").nth(2)).not.toHaveAttribute("open", "");
+  await expect(page.locator("#messageLog")).not.toBeVisible();
+  await expect(page.locator("#turnCalibrationOutput")).not.toBeVisible();
+
+  const sectionOrder = await page.locator(".control-panel > :is(section, details)").evaluateAll((items) =>
+    items.map((item) => item.querySelector("h2, summary")?.textContent?.trim()),
+  );
+  expect(sectionOrder).toEqual([
+    "描画",
+    "シミュレーション",
+    "キャリブレーション",
+    "ペン昇降",
+    "実行",
+    "ログ",
+    "回転テストログ",
+  ]);
+});
