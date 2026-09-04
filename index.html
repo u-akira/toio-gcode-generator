@@ -16,27 +16,26 @@
           </div>
           <div class="topbar-controls">
             <div class="toio-status-strip" aria-label="toio 接続状態">
-              <div class="toio-status-item">
+              <button id="connectMoveBtn" class="toio-connect-button" type="button" title="移動用toioに接続">
+                <span class="toio-status-mark disconnected" aria-hidden="true">!</span>
                 <span class="toio-status-label">移動</span>
                 <span id="moveCubeState" class="toio-status-value">未接続</span>
-              </div>
-              <div class="toio-status-item">
+              </button>
+              <button id="connectPenBtn" class="toio-connect-button" type="button" title="ペン用toioに接続">
+                <span class="toio-status-mark disconnected" aria-hidden="true">!</span>
                 <span class="toio-status-label">ペン</span>
                 <span id="penCubeState" class="toio-status-value">未接続</span>
-              </div>
-              <div class="toio-status-item position-status-item">
-                <span class="toio-status-label">位置</span>
-                <span id="positionState" class="toio-status-value">未取得</span>
-              </div>
-            </div>
-            <div class="toio-connect-actions">
-              <button id="connectMoveBtn" type="button">移動 接続</button>
-              <button id="connectPenBtn" type="button">ペン 接続</button>
-              <button id="swapRolesBtn" type="button">入替</button>
+              </button>
+              <button id="swapRolesBtn" class="role-swap-button" type="button" title="移動用とペン用の役割を入れ替える">入替</button>
             </div>
             <div class="status-row">
               <span id="simStatus" class="status-pill warn">未シミュレーション</span>
               <span id="runStatus" class="status-pill">待機中</span>
+              <div class="toio-status-item position-status-item">
+                <span class="toio-status-label">位置</span>
+                <span class="toio-status-mark disconnected" aria-hidden="true">!</span>
+                <span id="positionState" class="toio-status-value">未取得</span>
+              </div>
             </div>
           </div>
         </header>
@@ -58,16 +57,18 @@
       </section>
 
       <aside class="control-panel" aria-label="操作パネル">
+        <section class="panel-section run-mode-panel">
+          <h2>実行モード</h2>
+          <label class="run-mode-control">
+            <select id="runMode">
+              <option value="position">Position ID</option>
+              <option value="dead">Motor timing</option>
+            </select>
+          </label>
+        </section>
+
         <section class="panel-section">
           <h2>描画</h2>
-          <div class="form-grid mode-grid">
-            <label>実行モード
-              <select id="runMode">
-                <option value="position">Position ID</option>
-                <option value="dead">Motor timing</option>
-              </select>
-            </label>
-          </div>
           <div class="sample-row">
             <select id="sampleSelect" aria-label="サンプル図形">
               <option value="">サンプルを選択</option>
@@ -85,10 +86,9 @@
               <option value="samples/json/dojo.json">Dojo</option>
             </select>
             <button id="loadSampleBtn" type="button">Load</button>
-          </div>
-          <div class="button-grid import-grid">
-            <label class="file-button">
-              JSON Import
+            <label class="file-button icon-file-button" title="JSONを読み込む" aria-label="JSONを読み込む">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3h8l4 4v14H6V3Z"/><path d="M14 3v5h5M12 17V10M9 13l3-3 3 3"/></svg>
+              <span class="visually-hidden">JSON Import</span>
               <input id="importInput" type="file" accept="application/json" />
             </label>
           </div>

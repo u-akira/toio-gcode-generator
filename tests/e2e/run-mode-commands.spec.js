@@ -138,6 +138,7 @@ test("execution prep controls stay separate from turn calibration details", asyn
     items.map((item) => item.querySelector("h2, summary")?.textContent?.trim()),
   );
   expect(sectionOrder).toEqual([
+    "実行モード",
     "描画",
     "シミュレーション",
     "キャリブレーション",

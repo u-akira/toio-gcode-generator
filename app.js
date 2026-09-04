@@ -355,6 +355,11 @@ function setConnectionState(el, state, text) {
   el.textContent = text;
   el.classList.remove("connected", "disconnected", "connecting");
   if (state) el.classList.add(state);
+  const mark = el.closest(".toio-status-item, .toio-connect-button")?.querySelector(".toio-status-mark");
+  if (mark) {
+    mark.className = `toio-status-mark ${state || "disconnected"}`;
+    mark.textContent = state === "connected" ? "✓" : "!";
+  }
 }
 
 function setPill(el, text, cls = "") {
@@ -1168,6 +1173,11 @@ function hasFreshMovePose(maxAgeMs) {
 
 function updateMovePoseText(status = getMovePoseStatus()) {
   lastMovePoseState = status.state;
+  const mark = els.positionState.closest(".toio-status-item")?.querySelector(".toio-status-mark");
+  if (mark) {
+    mark.className = `toio-status-mark ${status.state === "fresh" ? "connected" : "disconnected"}`;
+    mark.textContent = status.state === "fresh" ? "✓" : "!";
+  }
   if (status.state === "fresh") {
     const matPose = nativeToMatPose(status.pose);
     els.positionState.textContent = `x:${matPose.x.toFixed(1)} y:${matPose.y.toFixed(1)} θ:${matPose.theta}`;
