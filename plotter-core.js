@@ -41,10 +41,10 @@
     runMode: "dead",
     deadTurnSpeed: 8,
     deadTurnBalanceTrim: 0,
-    deadTurnMsPer90: 990,
+    deadTurnMsPer90: 1023,
     deadMmPerSecAtDrawSpeed: 56,
     deadArcMmPerSecAtDrawSpeed: 29.72,
-    deadMmPerSecAtTravelSpeed: 70,
+    deadMmPerSecAtTravelSpeed: 54,
     deadTravelDistanceScale: 1,
     deadWheelBaseMm: 26,
   };

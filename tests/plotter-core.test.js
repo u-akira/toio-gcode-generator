@@ -48,8 +48,8 @@ test("default run mode is dead reckoning", () => {
 });
 
 test("default dead reckoning turn duration uses direct 90 degree milliseconds", () => {
-  assert.equal(core.DEFAULT_CONFIG.deadTurnMsPer90, 990);
-  assert.equal(core.computeTurnDurationMs(90, core.withDefaults()), 990);
+  assert.equal(core.DEFAULT_CONFIG.deadTurnMsPer90, 1023);
+  assert.equal(core.computeTurnDurationMs(90, core.withDefaults()), 1020);
 });
 
 test("pen front/back offset changes simulated cube path", () => {

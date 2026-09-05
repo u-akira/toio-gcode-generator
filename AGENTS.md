@@ -15,3 +15,6 @@
   command in the UI, the current command list may be reinterpreted and redrawn;
   when the user asks to adjust the formula in code, existing UI state should not
   be migrated or rewritten.
+- Treat every file under `data/` as read-only measurement evidence. Read and
+  compare these JSON files when calibrating, but never edit, overwrite, or
+  reformat them.
