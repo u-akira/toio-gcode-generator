@@ -285,6 +285,11 @@ function syncRunModeToForm() {
   els.runMode.value = runMode;
 }
 
+function syncPositionStatusVisibility() {
+  const positionStatus = els.positionState.closest(".position-status-item");
+  if (positionStatus) positionStatus.hidden = isDeadMode();
+}
+
 function applyConfigFromForm({ invalidate = true } = {}) {
   let changed = false;
   for (const [key, input] of Object.entries(configInputs)) {
@@ -310,6 +315,7 @@ function readConfigFromForm() {
 
 function changeRunMode() {
   runMode = els.runMode.value;
+  syncPositionStatusVisibility();
   selectedDeadSegmentId = null;
   simulation = null;
   invalidateSimulation("実行モードを変更しました");
@@ -1435,6 +1441,7 @@ function bindEvents() {
 
 function init() {
   syncConfigToForm();
+  syncPositionStatusVisibility();
   setCanvasHint();
   syncLegendToggle();
   renderDeadSegmentsEditor();

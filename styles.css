@@ -147,6 +147,10 @@ h2 {
   font-size: 12px;
 }
 
+.toio-status-item[hidden] {
+  display: none;
+}
+
 .toio-connect-button {
   display: inline-grid;
   grid-template-columns: auto auto minmax(58px, auto);

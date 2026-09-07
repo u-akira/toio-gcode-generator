@@ -18,7 +18,10 @@ test.beforeEach(async ({ page }) => {
 test("run mode changes produce different generated command labels", async ({ page }) => {
   await page.goto("/");
 
+  await expect(page.locator(".position-status-item")).toBeHidden();
+
   await page.selectOption("#runMode", "position");
+  await expect(page.locator(".position-status-item")).toBeVisible();
   await page.selectOption("#sampleSelect", "samples/json/line-1.json");
   await page.click("#simulateBtn");
 
@@ -29,6 +32,8 @@ test("run mode changes produce different generated command labels", async ({ pag
   expect(positionLabels.some((label) => label.includes("x:") && label.includes("theta:"))).toBe(true);
 
   await page.selectOption("#runMode", "dead");
+
+  await expect(page.locator(".position-status-item")).toBeHidden();
 
   await expect(page.locator("#simStatus")).toHaveClass(/warn/);
   await expect(page.locator("#toioCommandOutput")).toHaveText("Simulate after drawing to show commands.");
