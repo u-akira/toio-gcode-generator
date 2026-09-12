@@ -223,18 +223,29 @@
       if (command.type === "motor" && command.x != null && command.y != null && command.fromX != null && command.fromY != null) {
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
-        const fromCube = {
-          x: command.fromX,
-          y: command.fromY,
-          theta: command.startTheta ?? item.fromCubePose?.theta ?? command.theta ?? 0,
-        };
+        const fromCube = item.fromCubePose
+          ? { ...item.fromCubePose }
+          : {
+              x: command.fromX,
+              y: command.fromY,
+              theta: command.startTheta ?? command.theta ?? 0,
+            };
         const theta = command.theta ?? fromCube.theta;
         const cubePoint = {
           x: fromCube.x + (command.x - fromCube.x) * t,
           y: fromCube.y + (command.y - fromCube.y) * t,
         };
         const penPoint = cubeToPen(cubePoint, theta, config);
-        return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y };
+        return {
+          ...command,
+          fromX: fromCube.x,
+          fromY: fromCube.y,
+          x: cubePoint.x,
+          y: cubePoint.y,
+          theta,
+          penX: penPoint.x,
+          penY: penPoint.y,
+        };
       }
       if (command.type === "motor" && command.x != null && command.y != null && item.fromCubePose) {
         const span = Math.max(1, item.endMs - item.startMs);

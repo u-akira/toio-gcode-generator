@@ -72,7 +72,7 @@ test("dead reckoning motor animation uses dead timeline without position turn ap
   assert.equal(frame.previewProgress, undefined);
 });
 
-test("dead reckoning motor animation starts from the motor command from pose", () => {
+test("dead reckoning motor animation starts from the previous pose", () => {
   const config = core.withDefaults({ penOffsetX: -48, penOffsetY: 0 });
   const commands = [
     {
@@ -106,10 +106,10 @@ test("dead reckoning motor animation starts from the motor command from pose", (
   const midFrame = tools.commandsAtElapsed(timeline, travelItem.startMs + 500).at(-1);
 
   assert.equal(frame.type, "motor");
-  assert.equal(frame.x, 200);
-  assert.equal(frame.y, 200);
-  assert.equal(Math.round(midFrame.x), 105);
-  assert.equal(Math.round(midFrame.y), 160);
+  assert.equal(frame.x, 10);
+  assert.equal(frame.y, 20);
+  assert.equal(Math.round(midFrame.x), 10);
+  assert.equal(Math.round(midFrame.y), 70);
 });
 
 test("dead reckoning motor animation interpolates to the command endpoint", () => {
@@ -225,6 +225,26 @@ test("dead reckoning line animation follows wheel motion instead of stale endpoi
 
   assert.ok(Math.abs(frame.x) < 0.001);
   assert.ok(Math.abs(frame.y - 15) < 0.001);
+});
+
+test("dead reckoning travel animation starts from the previous command pose", () => {
+  const config = core.withDefaults({ penOffsetX: 0, penOffsetY: 0 });
+  const commands = [
+    { type: "turn", x: 50, y: 50, theta: 90, durationMs: 100, startTheta: 0 },
+    {
+      type: "motor", kind: "travel", geometry: "line",
+      durationMs: 1000, fromX: 0, fromY: 0, x: 50, y: 120, theta: 90,
+      penX: 50, penY: 120,
+    },
+  ];
+  const tools = loadTimelineTools({ commands, config, mode: "dead" });
+  const timeline = tools.buildSimulationTimeline(commands);
+  const frame = tools.commandsAtElapsed(timeline, 620).at(-1);
+
+  assert.equal(frame.fromX, 50);
+  assert.equal(frame.fromY, 50);
+  assert.equal(frame.x, 50);
+  assert.equal(frame.y, 85);
 });
 
 test("dead reckoning edited turn keeps the turn calibration", () => {
