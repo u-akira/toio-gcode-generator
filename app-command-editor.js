@@ -77,6 +77,7 @@
           if (override.rightSpeed != null) command.rightSpeed = override.rightSpeed;
           if (override.durationMs != null) command.durationMs = override.durationMs;
           command.manualWheelSpeeds = true;
+          command.motionModel = override.motionModel || "differential-drive";
           updateManualTurnPose(command, index);
         } else if (command.type === "wait") {
           if (override.ms != null) command.ms = override.ms;

@@ -128,8 +128,8 @@
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
         const theta = command.startTheta ?? item.fromTheta ?? 0;
         const start = {
-          x: command.fromX ?? command.x,
-          y: command.fromY ?? command.y,
+          x: item.fromCubePose?.x ?? command.fromX ?? command.x,
+          y: item.fromCubePose?.y ?? command.fromY ?? command.y,
         };
         const pose = deadMotion.integrateDifferentialDrive(
           start,
@@ -200,7 +200,7 @@
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
         const startTheta = command.startTheta ?? item.fromCubePose?.theta ?? command.theta ?? 0;
         const pose = deadMotion.integrateDifferentialDrive(
-          { x: command.fromX, y: command.fromY },
+          item.fromCubePose || { x: command.fromX, y: command.fromY },
           startTheta,
           command.leftSpeed,
           command.rightSpeed,

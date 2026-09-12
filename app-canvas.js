@@ -467,7 +467,9 @@
       }
 
       const theta = command.theta ?? state.currentTheta ?? 0;
+      const chainedCommand = command.kind === "travel" || command.motionModel === "differential-drive";
       const startCube =
+        (chainedCommand ? state.currentCube : null) ||
         finitePoint(command.fromX, command.fromY) ||
         state.currentCube ||
         (state.currentPen ? penToCube(state.currentPen, theta, config) : null) ||

@@ -107,6 +107,32 @@ test("straight motor duration override wins over captured distance scale", () =>
   assert.equal(regeneratedCommands[0].durationMs, 1000);
 });
 
+test("persisted turn override reflows its endpoint into the following travel", () => {
+  const overrides = new Map();
+  const editedCommands = [
+    { type: "turn", role: "turn-to-travel", segmentId: "seg-1", angle: 79, leftSpeed: 8, rightSpeed: -8, durationMs: 900, x: 100, y: 100, theta: 0, manualWheelSpeeds: true, motionModel: "differential-drive" },
+  ];
+  loadCommandEditor({
+    commands: editedCommands,
+    overrides,
+    getConfig: () => ({ deadTurnMsPer90: 1023, deadTurnSpeed: 8, deadWheelBaseMm: 26, penOffsetX: 0, penOffsetY: 0 }),
+  }).captureCommandOverrides();
+
+  const regeneratedCommands = [
+    { type: "turn", role: "turn-to-travel", segmentId: "seg-1", angle: 79, leftSpeed: 8, rightSpeed: -8, durationMs: 1200, x: 100, y: 100, theta: 0 },
+    { type: "motor", kind: "travel", geometry: "line", segmentId: "seg-1", speed: 20, durationMs: 1000, fromX: 100, fromY: 100, x: 100, y: 170, theta: 0 },
+  ];
+  loadCommandEditor({
+    commands: regeneratedCommands,
+    overrides,
+    getConfig: () => ({ drawSpeed: 20, travelSpeed: 20, deadTurnMsPer90: 1023, deadTurnSpeed: 8, deadWheelBaseMm: 26, deadMmPerSecAtTravelSpeed: 70, penOffsetX: 0, penOffsetY: 0 }),
+  }).applyCommandOverrides();
+
+  assert.equal(regeneratedCommands[0].motionModel, "differential-drive");
+  assert.equal(regeneratedCommands[1].fromX, regeneratedCommands[0].x);
+  assert.equal(regeneratedCommands[1].fromY, regeneratedCommands[0].y);
+});
+
 test("dead line command reflow starts following travel at the edited endpoint", () => {
   const commands = [
     { type: "pen", state: "down", penX: 0, penY: 0 },
