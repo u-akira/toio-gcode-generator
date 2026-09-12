@@ -168,6 +168,10 @@
     }
 
     function drawSegmentHighlight(segment, selected, deadPreview) {
+      // A travel segment's fallback [start, end] path is only an idealized
+      // helper line. It is not the path executed by dead reckoning (which can
+      // include turns), so do not render it as if it were movement.
+      if (segment.kind === "travel") return;
       const dpr = root.devicePixelRatio || 1;
       const points = segmentPenPoints(segment, deadPreview).map(matToCanvas);
       if (points.length < 2) return;
@@ -298,7 +302,7 @@
           if (command.state === "up") upPoints = eventPoint ? [eventPoint] : [];
           penDown = command.state === "down";
         }
-        if (command.type === "motor" && command.geometry === "arc" && Array.isArray(command.penPreviewPoints)) {
+        if ((command.type === "motor" || command.type === "turn") && Array.isArray(command.penPreviewPoints)) {
           for (const point of command.penPreviewPoints) {
             if (penDown) {
               downPoints.push(point);
@@ -308,7 +312,7 @@
             }
             lastPenPoint = point;
           }
-        } else if ((command.type === "move" || command.type === "motor") && command.penX != null) {
+        } else if ((command.type === "move" || command.type === "motor" || command.type === "turn") && command.penX != null) {
           const point = { x: command.penX, y: command.penY };
           if (penDown) {
             downPoints.push(point);
@@ -432,8 +436,12 @@
     }
 
     function replayTurnCommand(command, state, config) {
+      if (Array.isArray(command.cubePreviewPoints) && Array.isArray(command.penPreviewPoints)) {
+        replayPreviewPointArrays(command, state);
+        return;
+      }
       const theta = command.theta ?? state.currentTheta ?? 0;
-      if (command.x != null && command.y != null) {
+      if (!state.currentCube && command.x != null && command.y != null) {
         state.currentCube = { x: command.x, y: command.y };
       }
       if (!state.currentCube) {
@@ -453,7 +461,7 @@
     }
 
     function replayMotorCommand(command, state, config) {
-      if (command.geometry === "arc" && Array.isArray(command.cubePreviewPoints) && Array.isArray(command.penPreviewPoints)) {
+      if (Array.isArray(command.cubePreviewPoints) && Array.isArray(command.penPreviewPoints)) {
         replayPreviewPointArrays(command, state);
         return;
       }

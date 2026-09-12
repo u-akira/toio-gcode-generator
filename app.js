@@ -191,6 +191,7 @@ const simulationTimelineTools = window.ToioPlotterTimeline.createSimulationTimel
   normalizeDegrees,
   signedAngleDelta: window.PlotterCore.signedAngleDelta,
   pointOnCircle: window.PlotterCore.pointOnCircle,
+  deadMotion: window.ToioPlotterDeadMotion,
   minTurnDurationMs: MIN_TURN_DURATION_MS,
 });
 
