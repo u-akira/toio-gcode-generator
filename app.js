@@ -130,6 +130,7 @@ let simulationValid = false;
 let runMode = DEFAULT_CONFIG.runMode;
 let deadSegmentSettings = loadDeadSegmentSettings();
 let commandOverrides = new Map();
+let planningOptions = {};
 let turnCalibrationLog = loadTurnCalibrationLog({ resetOnLoad: resetTurnCalibrationLogOnLoad });
 let selectedDeadSegmentId = null;
 let moveCube = null;
@@ -457,7 +458,12 @@ function processFreehandStroke(raw) {
 
 function createSimulation() {
   if (isDeadMode()) {
-    return window.PlotterCore.createDeadReckoningSimulation({ strokes, config, segmentSettings: deadSegmentSettings });
+    return window.PlotterCore.createDeadReckoningSimulation({
+      strokes,
+      config,
+      segmentSettings: deadSegmentSettings,
+      planningOptions: commandOverrides.size ? {} : planningOptions,
+    });
   }
   return window.PlotterCore.createSimulation({ strokes, config });
 }
@@ -996,6 +1002,7 @@ function exportDrawing() {
     config,
     strokes,
     deadSegmentSettings,
+    planningOptions,
     commandOverrides: serializeCommandOverrides(commandOverrides),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -1063,6 +1070,7 @@ function importDrawingPayload(payload, reason, options = { preservePenOffset: tr
   redoStack = [];
   deadSegmentSettings = payload.deadSegmentSettings && typeof payload.deadSegmentSettings === "object" ? payload.deadSegmentSettings : {};
   commandOverrides = loadCommandOverrides(payload.commandOverrides);
+  planningOptions = payload.planningOptions && typeof payload.planningOptions === "object" ? payload.planningOptions : {};
   selectedDeadSegmentId = null;
   saveDeadSegmentSettings(deadSegmentSettings);
   renderDeadSegmentsEditor();
