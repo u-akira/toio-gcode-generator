@@ -208,6 +208,11 @@ const simulationPlayback = window.ToioPlotterSimulationPlayer.createSimulationPl
   onDraw: () => draw(),
 });
 
+window.__toioTest = {
+  getAnimationSnapshot: () => simulationPlayback.getAnimationSnapshot(),
+  seekAnimation: (elapsedMs) => simulationPlayback.seekAnimation(elapsedMs),
+};
+
 const commandEditor = window.ToioPlotterCommandEditor.createCommandEditor({
   outputEl: els.toioCommandOutput,
   getSimulation: () => simulation,

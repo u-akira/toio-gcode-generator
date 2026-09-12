@@ -32,7 +32,9 @@
   function deadWheelMmPerSec(speed, command, config) {
     const draw = command.kind === "draw";
     const baseSpeed = Math.max(1, Math.abs(Number(draw ? config.drawSpeed : config.travelSpeed) || 1));
-    const baseMmPerSec = draw ? deadArcMmPerSecAtDrawSpeed(config) : deadTravelMmPerSec(config);
+    const baseMmPerSec = draw
+      ? command.geometry === "arc" ? deadArcMmPerSecAtDrawSpeed(config) : deadDrawLineMmPerSec(config)
+      : deadTravelMmPerSec(config);
     return baseMmPerSec * (Number(speed) || 0) / baseSpeed;
   }
 

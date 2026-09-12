@@ -31,6 +31,40 @@
       return animation.playing ? now() - animation.startedAt : animation.elapsedMs;
     }
 
+    function getAnimationSnapshot() {
+      if (!animation) return null;
+      const elapsedMs = getElapsedMs();
+      const commands = timelineTools.commandsAtElapsed(animation.timeline, elapsedMs);
+      const activeItem = animation.timeline.items.find((item) => item.commandIndex === activeCommandIndex) || null;
+      return {
+        elapsedMs,
+        activeCommandIndex,
+        commandDurationMs: activeItem ? activeItem.endMs - activeItem.startMs : null,
+        items: animation.timeline.items.map((item) => ({
+          commandIndex: item.commandIndex,
+          type: item.command.type,
+          kind: item.command.kind || null,
+          role: item.command.role || null,
+          startMs: item.startMs,
+          endMs: item.endMs,
+          durationMs: item.endMs - item.startMs,
+        })),
+        commands,
+      };
+    }
+
+    function seekAnimation(elapsedMs) {
+      if (!animation) return false;
+      animation.elapsedMs = clamp(Number(elapsedMs) || 0, 0, animation.durationMs);
+      animation.startedAt = now() - animation.elapsedMs;
+      animation.playing = false;
+      cancelPendingFrame();
+      activeCommandIndex = timelineTools.activeCommandIndexAtElapsed(animation.timeline, animation.elapsedMs);
+      onControlsChanged();
+      notifyFrame();
+      return true;
+    }
+
     function getAnimatedCommands() {
       if (!animation) return getCommands();
       return timelineTools.commandsAtElapsed(animation.timeline, getElapsedMs());
@@ -151,6 +185,8 @@
       getAnimation,
       getActiveCommandIndex,
       getElapsedMs,
+      getAnimationSnapshot,
+      seekAnimation,
       getAnimatedCommands,
       start,
       stop,

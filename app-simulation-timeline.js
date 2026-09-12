@@ -126,7 +126,9 @@
       if ((command.type === "turn" || command.type === "motor") && command.motionModel === "differential-drive" && (command.fromX != null || (command.type === "turn" && command.x != null))) {
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
-        const theta = command.startTheta ?? item.fromTheta ?? 0;
+        const theta = command.type === "turn"
+          ? command.startTheta ?? item.fromCubePose?.theta ?? item.fromTheta ?? 0
+          : item.fromCubePose?.theta ?? command.startTheta ?? item.fromTheta ?? command.theta ?? 0;
         const start = {
           x: item.fromCubePose?.x ?? command.fromX ?? command.x,
           y: item.fromCubePose?.y ?? command.fromY ?? command.y,
@@ -198,7 +200,7 @@
       if (command.type === "motor" && command.leftSpeed != null && command.rightSpeed != null && command.fromX != null && command.fromY != null) {
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
-        const startTheta = command.startTheta ?? item.fromCubePose?.theta ?? command.theta ?? 0;
+        const startTheta = item.fromCubePose?.theta ?? command.startTheta ?? command.theta ?? 0;
         const pose = deadMotion.integrateDifferentialDrive(
           item.fromCubePose || { x: command.fromX, y: command.fromY },
           startTheta,

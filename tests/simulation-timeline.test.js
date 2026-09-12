@@ -227,6 +227,24 @@ test("dead reckoning line animation follows wheel motion instead of stale endpoi
   assert.ok(Math.abs(frame.y - 15) < 0.001);
 });
 
+test("dead reckoning straight draw animation uses straight-line calibration", () => {
+  const config = core.withDefaults({ penOffsetX: 0, penOffsetY: 0, deadMmPerSecAtDrawSpeed: 56, deadArcMmPerSecAtDrawSpeed: 29.84 });
+  const commands = [
+    {
+      type: "motor", kind: "draw", geometry: "line", motionModel: "differential-drive",
+      leftSpeed: 20, rightSpeed: 20, durationMs: 2500,
+      fromX: 0, fromY: 0, x: 140, y: 0, theta: 0, startTheta: 0,
+      penX: 140, penY: 0,
+    },
+  ];
+  const tools = loadTimelineTools({ commands, config, mode: "dead" });
+  const timeline = tools.buildSimulationTimeline(commands);
+  const frame = tools.commandsAtElapsed(timeline, 1250).at(-1);
+
+  assert.ok(Math.abs(frame.x - 70) < 0.01);
+  assert.ok(Math.abs(frame.y) < 0.01);
+});
+
 test("dead reckoning travel animation starts from the previous command pose", () => {
   const config = core.withDefaults({ penOffsetX: 0, penOffsetY: 0 });
   const commands = [
