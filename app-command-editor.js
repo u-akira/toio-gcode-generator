@@ -508,7 +508,7 @@
           command.penY = currentPen.y;
           continue;
         }
-        if (command.geometry !== "line") {
+        if (command.geometry !== "line" && command.kind !== "travel") {
           if (command.x != null && command.y != null) currentCube = { x: command.x, y: command.y };
           if (command.theta != null) currentTheta = command.theta;
           if (command.penX != null) currentPen = { x: command.penX, y: command.penY };

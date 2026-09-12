@@ -64,7 +64,48 @@ test("edited parallel-line animation uses the edited turn and remains physically
     const current = allFrames[index];
     const distance = Math.hypot(current.x - previous.x, current.y - previous.y);
     expect(distance, `jump ${distance} between ${JSON.stringify(previous)} and ${JSON.stringify(current)}`).toBeLessThan(10);
-    const angleDelta = Math.abs(((current.theta - previous.theta + 180) % 360) - 180);
+    const angleDelta = Math.abs(((((current.theta - previous.theta) + 180) % 360) + 360) % 360 - 180);
     expect(angleDelta, `rotation jump ${angleDelta} between ${JSON.stringify(previous)} and ${JSON.stringify(current)}`).toBeLessThan(15);
+  }
+});
+
+test("edited triangle draw animation remains physically continuous", async ({ page }) => {
+  await page.goto("/");
+  await page.selectOption("#sampleSelect", "samples/json/triangle.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const thirdRow = page.locator(".command-row").nth(2);
+  await expect(thirdRow).toBeVisible();
+  const duration = thirdRow.locator('input[data-command-key="durationMs"]');
+  await expect(duration).toHaveValue(/2500|2580/);
+  await duration.fill("1000");
+  await duration.blur();
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const initial = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  const editedItem = initial.items.find((item) => item.commandIndex === 2);
+  expect(editedItem).toBeDefined();
+  expect(editedItem.durationMs).toBe(1000);
+
+  const frames = [];
+  for (let elapsedMs = 0; elapsedMs <= initial.items.at(-1).endMs; elapsedMs += 25) {
+    await page.evaluate((time) => window.__toioTest.seekAnimation(time), elapsedMs);
+    const snapshot = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+    const item = snapshot.items.find((candidate) => elapsedMs >= candidate.startMs && elapsedMs < candidate.endMs);
+    const command = item && snapshot.commands[item.commandIndex];
+    if (item && command?.x != null && command?.y != null && command?.theta != null) {
+      frames.push({ elapsedMs, commandIndex: item.commandIndex, x: command.x, y: command.y, theta: command.theta });
+    }
+  }
+  expect(frames.length).toBeGreaterThan(10);
+  for (let index = 1; index < frames.length; index += 1) {
+    const previous = frames[index - 1];
+    const current = frames[index];
+    const distance = Math.hypot(current.x - previous.x, current.y - previous.y);
+    expect(distance, `triangle position jump ${distance}: ${JSON.stringify(previous)} -> ${JSON.stringify(current)}`).toBeLessThan(10);
+    const angleDelta = Math.abs(((((current.theta - previous.theta) + 180) % 360) + 360) % 360 - 180);
+    expect(angleDelta, `triangle rotation jump ${angleDelta}: ${JSON.stringify(previous)} -> ${JSON.stringify(current)}`).toBeLessThan(15);
   }
 });
