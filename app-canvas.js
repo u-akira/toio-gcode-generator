@@ -168,6 +168,10 @@
     }
 
     function drawSegmentHighlight(segment, selected, deadPreview) {
+      // A travel segment's fallback [start, end] path is only an idealized
+      // helper line. It is not the path executed by dead reckoning (which can
+      // include turns), so do not render it as if it were movement.
+      if (segment.kind === "travel") return;
       const dpr = root.devicePixelRatio || 1;
       const points = segmentPenPoints(segment, deadPreview).map(matToCanvas);
       if (points.length < 2) return;
