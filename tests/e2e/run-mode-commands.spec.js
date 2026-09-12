@@ -50,6 +50,8 @@ test("run mode changes produce different generated command labels", async ({ pag
   expect(deadLabels.some((label) => label.startsWith("move: draw") || label.startsWith("move: travel"))).toBe(true);
   expect(deadLabels.some((label) => label.includes("speed:") || (label.includes("R:") && label.includes("L:")))).toBe(true);
   expect(deadLabels.some((label) => label.includes("x:") || label.includes("theta:"))).toBe(false);
+  await expect(page.locator("[data-run-command-index]").first()).toBeVisible();
+  await expect(page.locator("[data-run-command-index]").first()).toBeDisabled();
 });
 
 test("command duration edits survive adding a freehand stroke", async ({ page }) => {
@@ -77,6 +79,27 @@ test("command duration edits survive adding a freehand stroke", async ({ page })
   await page.click("#simulateBtn");
   await expect(page.locator("#simStatus")).toHaveClass(/ok/);
   await expect(page.locator('#toioCommandOutput input[data-command-key="durationMs"]').first()).toHaveValue("1230");
+});
+
+test("command navigation stays available while the control panel scrolls", async ({ page }) => {
+  await page.goto("/");
+
+  await page.selectOption("#sampleSelect", "samples/json/keroppi-outline.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const commandNav = page.locator(".command-nav");
+  await expect(commandNav).toHaveCSS("position", "sticky");
+
+  await page.locator(".control-panel").evaluate((panel) => {
+    panel.scrollTop = panel.scrollHeight;
+  });
+  const navBox = await commandNav.boundingBox();
+  const panelBox = await page.locator(".control-panel").boundingBox();
+  expect(navBox).not.toBeNull();
+  expect(panelBox).not.toBeNull();
+  expect(navBox.y).toBeGreaterThanOrEqual(panelBox.y);
+  expect(navBox.y).toBeLessThan(panelBox.y + panelBox.height);
 });
 
 test("canvas drawing toolbar supports undo and redo", async ({ page }) => {

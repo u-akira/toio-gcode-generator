@@ -110,7 +110,7 @@ Dead reckoning モードでは、画面上の距離・角度を実機の移動�
 | --- | ---: | --- |
 | `90度回転ms` (`deadTurnMsPer90`) | `1023` | turn |
 | `直線描画 mm/s` (`deadMmPerSecAtDrawSpeed`) | `56` | 直線 draw |
-| `円弧描画 mm/s` (`deadArcMmPerSecAtDrawSpeed`) | `29.72` | 円弧 draw |
+| `円弧描画 mm/s` (`deadArcMmPerSecAtDrawSpeed`) | `29.84` | 円弧 draw |
 | `移動 mm/s` (`deadMmPerSecAtTravelSpeed`) | `54` | pen-up travel |
 
 直線 draw と円弧 draw は移動特性が異なるため、別々に調整します。直線用の値を円弧へ、円弧用の値を直線へ流用しないでください。`90度回転ms` は角度に比例して turn 時間を計算し、実際のコマンド時間は 10ms 単位に丸められます。

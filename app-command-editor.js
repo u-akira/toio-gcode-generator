@@ -24,6 +24,7 @@
       degToRad,
       normalizeDegrees,
       syncSimulationControls,
+      syncRunButton,
       focusCommand,
       updateAfterEdit,
       draw,
@@ -137,6 +138,7 @@
       outputEl.innerHTML = simulation.commands.map((command, index) => commandRowTemplate(command, index)).filter(Boolean).join("");
       lastScrolledCommandIndex = -1;
       syncSimulationControls();
+      syncRunButton?.();
       updateActiveCommandRow();
     }
 
@@ -144,6 +146,7 @@
       const label = isDeadMode() ? formatDeadToioCommand(command) : formatPositionToioCommand(command);
       if (!label) return "";
       const controls = commandControlsTemplate(command, index);
+      const runButton = commandRunButtonTemplate(command, index);
       const step = String(index + 1).padStart(2, "0");
       const stepControl = controls
         ? `<button class="command-step-button" type="button" data-command-step="${index}">${step}</button>`
@@ -154,9 +157,19 @@
       <div class="command-main">
         <div class="command-label">${escapeHtml(label)}</div>
         ${controls}
+        ${runButton}
       </div>
     </div>
   `;
+    }
+
+    function commandRunButtonTemplate(command, index) {
+      if (!isSingleCommandCandidate(command)) return "";
+      return `<button class="command-run-button" type="button" data-run-command-index="${index}" disabled>Run</button>`;
+    }
+
+    function isSingleCommandCandidate(command) {
+      return command?.type === "motor" || command?.type === "turn" || command?.type === "move" || command?.type === "rotate";
     }
 
     function commandControlsTemplate(command, index) {
@@ -486,6 +499,8 @@
       renderToioCommandOutput,
       commandRowTemplate,
       commandControlsTemplate,
+      commandRunButtonTemplate,
+      isSingleCommandCandidate,
       motorStraightSpeed,
       motorDistanceScale,
       displayCommandDurationMs,

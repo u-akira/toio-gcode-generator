@@ -228,6 +228,7 @@ const commandEditor = window.ToioPlotterCommandEditor.createCommandEditor({
   degToRad,
   normalizeDegrees,
   syncSimulationControls,
+  syncRunButton,
   focusCommand: (index, options) => simulationPlayback.focusCommand(index, options),
   getActiveCommandIndex: () => simulationPlayback.getActiveCommandIndex(),
   draw,
@@ -341,6 +342,9 @@ function updateSb3ExportButton() {
 function syncRunButton() {
   els.runBtn.disabled = toioRunner.isRunning() || !simulationValid || !hasRequiredToioConnection();
   els.penCheckBtn.disabled = toioRunner.isRunning() || !isCubeConnected(penCube);
+  document.querySelectorAll("[data-run-command-index]").forEach((button) => {
+    button.disabled = toioRunner.isRunning() || !simulationValid || !hasRequiredToioConnection();
+  });
 }
 
 function syncDrawingButtons() {
@@ -928,6 +932,12 @@ async function runToio() {
   await toioRunner.runToio();
 }
 
+async function runSingleCommand(index) {
+  const command = simulation?.commands?.[index];
+  if (!command) return;
+  await toioRunner.runSingleCommand(command);
+}
+
 async function setPen(state, command = null) {
   await toioRunner.setPen(state, command);
 }
@@ -1382,6 +1392,11 @@ function bindEvents() {
     if (event.target instanceof HTMLInputElement) commandEditor.updateCommandEdit(event.target, { render: true });
   });
   els.toioCommandOutput?.addEventListener("click", (event) => {
+    const runButton = event.target.closest?.("[data-run-command-index]");
+    if (runButton) {
+      runSingleCommand(Number(runButton.dataset.runCommandIndex)).catch((error) => log(`Command run failed: ${error.message}`));
+      return;
+    }
     const button = event.target.closest?.("[data-command-step]");
     if (button) jumpToCommand(Number(button.dataset.commandStep));
   });

@@ -18,7 +18,7 @@ Web上の設定から計算したコマンドを実機で描画し、シミュ�
 | --- | ---: | --- |
 | `deadTurnMsPer90` | 1023 | turn |
 | `deadMmPerSecAtDrawSpeed` | 56 | 直線 draw |
-| `deadArcMmPerSecAtDrawSpeed` | 29.72 | 円弧 draw |
+| `deadArcMmPerSecAtDrawSpeed` | 29.84 | 円弧 draw |
 | `deadMmPerSecAtTravelSpeed` | 54 | pen-up travel |
 
 ## 設定値とtoioコマンドの対応
@@ -71,6 +71,21 @@ Web上の設定から計算したコマンドを実機で描画し、シミュ�
 - 正確な実測は未実施。
 - 現時点ではシミュレーションと比較的一致している。
 - 円弧用の `deadArcMmPerSecAtDrawSpeed` は、直線 draw と分けて評価する。
+
+### 四角
+
+- `data/square-copy-paper.json` の実測結果は、120×120mmの四角を一筆書きしたもの。
+- 四角の各辺の geometry は実測に合っており、draw コマンドの個別時間補正は記録されていない。
+- 実測で必要だった個別補正は、90度の方向転換3回が各 `1420ms`、最後の描画方向へ戻る方向転換が `500ms`、各辺の間の pen-up travel 3回が各 `670ms`。
+- これらは四角の経路・姿勢に依存する `commandOverrides` であり、共通の `deadTurnMsPer90` や `deadMmPerSecAtTravelSpeed` へ反映すると、他のサンプルの turn・travel に影響するため、共通初期値には反映しない。
+
+### 波型
+
+- `data/wave-copy-paper.json` は、半径14mm・180度の円弧を2つつないだ波型の実測結果。
+- 実測時の円弧 draw は、1つ目が左右 `1 / 20`・`1470ms`、2つ目が左右 `20 / 1`・`1470ms`。円弧の実測速度は左右とも最大20以下だった。
+- 円弧間の pen-up travel は `950ms`（`distanceScale: 0.992424...`）で調整されている。
+- 現在の自動計算では、半径14mmと `deadWheelBaseMm=26` の組み合わせにより外側の車輪速度が `39` になる。波型の実測に合わせ、円弧の車輪速度は最大20以下を目標とする。
+- この速度制限を共通の円弧計算へ反映すると、他の円弧サンプルの速度・時間に影響するため、現時点では共通キャリブレーション値へ反映しない。
 
 ### その他のサンプル
 

@@ -571,6 +571,15 @@ h2 {
   font-size: 12px;
 }
 
+.command-nav {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0 -4px 8px;
+  padding: 4px;
+  background: var(--panel);
+}
+
 .segment-editor {
   display: block;
 }
@@ -817,6 +826,13 @@ h2 {
 
 .command-main {
   min-width: 0;
+}
+
+.command-run-button {
+  min-height: 28px;
+  margin-top: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
 }
 
 .command-label {

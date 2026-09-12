@@ -130,6 +130,65 @@
       }
     }
 
+    async function runSingleCommand(command) {
+      if (!command || !isSingleCommandCandidate(command)) return;
+      if (!getSimulationValid()) {
+        log("Run simulation before executing a command.");
+        return;
+      }
+      if (!getMoveCube() || !getPenCube()) {
+        log("Connect both move and pen toio cubes.");
+        return;
+      }
+      if (running) return;
+
+      running = true;
+      abortRun = false;
+      runButtonEl.disabled = true;
+      syncRunButton();
+      setPill(runStatusEl, "Single command running", "warn");
+
+      try {
+        if (isDeadMode()) {
+          if (command.type === "motor") {
+            await setPen(command.kind === "draw" ? "down" : "up");
+            await runDeadMotor(command);
+          } else if (command.type === "turn") {
+            await setPen("up");
+            await runDeadTurn(command);
+          } else {
+            throw new Error("This command is not available in dead reckoning mode.");
+          }
+        } else {
+          if (command.type !== "move" && command.type !== "rotate") {
+            throw new Error("This command is not available in Position ID mode.");
+          }
+          await setPen("up");
+          await ensureFreshPositionOrRetry("before selected command");
+          const nativePoint = matToNativePoint(command);
+          if (!pointInBounds(nativePoint, MAT)) {
+            throw new Error(`toio target is outside mat: x=${nativePoint.x.toFixed(1)} y=${nativePoint.y.toFixed(1)}`);
+          }
+          await runMoveCommandWithPositionRetry(command, nativePoint);
+        }
+        await setPen("up");
+        await Promise.allSettled([getMoveCube()?.stop(), getPenCube()?.stop()]);
+        setPill(runStatusEl, "Done", "ok");
+        log("single toio command completed.");
+      } catch (error) {
+        setPill(runStatusEl, "Stopped", "error");
+        log(`single toio command stopped: ${error.message}`);
+        await emergencyStop();
+      } finally {
+        running = false;
+        syncRunButton();
+      }
+    }
+
+    function isSingleCommandCandidate(command) {
+      return command?.type === "motor" || command?.type === "turn" || command?.type === "move" || command?.type === "rotate";
+    }
+
     async function setPen(state, command = null) {
       const config = getConfig();
       const penCube = getPenCube();
@@ -206,6 +265,12 @@
 
     async function emergencyStop() {
       abortRun = true;
+      await Promise.allSettled([getMoveCube()?.stop()]);
+      try {
+        if (getPenCube()) await setPen("up");
+      } catch (error) {
+        log(`Emergency pen up skipped: ${error.message}`);
+      }
       await Promise.allSettled([getMoveCube()?.stop(), getPenCube()?.stop()]);
       setPill(runStatusEl, "Stopped", "error");
     }
@@ -300,6 +365,7 @@
       sleep,
       playRunSound,
       runToio,
+      runSingleCommand,
       setPen,
       runMoveCommandWithPositionRetry,
       ensureFreshPositionOrRetry,
