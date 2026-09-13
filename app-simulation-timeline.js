@@ -12,6 +12,7 @@
       signedAngleDelta,
       pointOnCircle,
       minTurnDurationMs,
+      deadMotion,
     } = deps;
 
     function buildSimulationTimeline(commands) {
@@ -122,6 +123,41 @@
     function partialDeadCommand(item, elapsedMs) {
       const command = item.command;
       const config = getConfig();
+      if ((command.type === "turn" || command.type === "motor") && command.motionModel === "differential-drive" && (command.fromX != null || (command.type === "turn" && command.x != null))) {
+        const span = Math.max(1, item.endMs - item.startMs);
+        const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
+        const theta = command.type === "turn"
+          ? command.startTheta ?? item.fromCubePose?.theta ?? item.fromTheta ?? 0
+          : item.fromCubePose?.theta ?? command.startTheta ?? item.fromTheta ?? command.theta ?? 0;
+        const start = {
+          x: item.fromCubePose?.x ?? command.fromX ?? command.x,
+          y: item.fromCubePose?.y ?? command.fromY ?? command.y,
+        };
+        const pose = deadMotion.integrateDifferentialDrive(
+          start,
+          theta,
+          command.leftSpeed,
+          command.rightSpeed,
+          (command.durationMs || 0) * t,
+          command,
+          config,
+        );
+        const penPoint = cubeToPen(pose, pose.theta, config);
+        const preview = deadMotion.differentialPreviewPoints(
+          start, theta, command.leftSpeed, command.rightSpeed,
+          (command.durationMs || 0) * t, command, config,
+        );
+        return {
+          ...command,
+          x: pose.x,
+          y: pose.y,
+          theta: normalizeDegrees(pose.theta),
+          penX: penPoint.x,
+          penY: penPoint.y,
+          cubePreviewPoints: preview.map((point) => ({ x: point.x, y: point.y, theta: normalizeDegrees(point.theta) })),
+          penPreviewPoints: preview.map((point) => cubeToPen(point, point.theta, config)),
+        };
+      }
       if (command.type === "turn" && command.theta != null && item.fromTheta != null) {
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
@@ -161,21 +197,57 @@
           penPreviewPoints: previewEnd(command.penPreviewPoints, penPoint),
         };
       }
+      if (command.type === "motor" && command.leftSpeed != null && command.rightSpeed != null && command.fromX != null && command.fromY != null) {
+        const span = Math.max(1, item.endMs - item.startMs);
+        const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
+        const startTheta = item.fromCubePose?.theta ?? command.startTheta ?? command.theta ?? 0;
+        const pose = deadMotion.integrateDifferentialDrive(
+          item.fromCubePose || { x: command.fromX, y: command.fromY },
+          startTheta,
+          command.leftSpeed,
+          command.rightSpeed,
+          (command.durationMs || 0) * t,
+          command,
+          config,
+        );
+        const penPoint = cubeToPen(pose, pose.theta, config);
+        return {
+          ...command,
+          x: pose.x,
+          y: pose.y,
+          theta: normalizeDegrees(pose.theta),
+          penX: penPoint.x,
+          penY: penPoint.y,
+          cubePreviewPoints: null,
+          penPreviewPoints: null,
+        };
+      }
       if (command.type === "motor" && command.x != null && command.y != null && command.fromX != null && command.fromY != null) {
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
-        const fromCube = {
-          x: command.fromX,
-          y: command.fromY,
-          theta: command.startTheta ?? item.fromCubePose?.theta ?? command.theta ?? 0,
-        };
+        const fromCube = item.fromCubePose
+          ? { ...item.fromCubePose }
+          : {
+              x: command.fromX,
+              y: command.fromY,
+              theta: command.startTheta ?? command.theta ?? 0,
+            };
         const theta = command.theta ?? fromCube.theta;
         const cubePoint = {
           x: fromCube.x + (command.x - fromCube.x) * t,
           y: fromCube.y + (command.y - fromCube.y) * t,
         };
         const penPoint = cubeToPen(cubePoint, theta, config);
-        return { ...command, x: cubePoint.x, y: cubePoint.y, theta, penX: penPoint.x, penY: penPoint.y };
+        return {
+          ...command,
+          fromX: fromCube.x,
+          fromY: fromCube.y,
+          x: cubePoint.x,
+          y: cubePoint.y,
+          theta,
+          penX: penPoint.x,
+          penY: penPoint.y,
+        };
       }
       if (command.type === "motor" && command.x != null && command.y != null && item.fromCubePose) {
         const span = Math.max(1, item.endMs - item.startMs);

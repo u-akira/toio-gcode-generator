@@ -191,6 +191,7 @@ const simulationTimelineTools = window.ToioPlotterTimeline.createSimulationTimel
   normalizeDegrees,
   signedAngleDelta: window.PlotterCore.signedAngleDelta,
   pointOnCircle: window.PlotterCore.pointOnCircle,
+  deadMotion: window.ToioPlotterDeadMotion,
   minTurnDurationMs: MIN_TURN_DURATION_MS,
 });
 
@@ -206,6 +207,11 @@ const simulationPlayback = window.ToioPlotterSimulationPlayer.createSimulationPl
   onActiveCommandChanged: () => commandEditor.updateActiveCommandRow(),
   onDraw: () => draw(),
 });
+
+window.__toioTest = {
+  getAnimationSnapshot: () => simulationPlayback.getAnimationSnapshot(),
+  seekAnimation: (elapsedMs) => simulationPlayback.seekAnimation(elapsedMs),
+};
 
 const commandEditor = window.ToioPlotterCommandEditor.createCommandEditor({
   outputEl: els.toioCommandOutput,

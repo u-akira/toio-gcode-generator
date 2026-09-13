@@ -52,11 +52,12 @@
         const override = key ? commandOverrides.get(key) : null;
         if (!override) continue;
         if (command.type === "motor") {
-          if (command.geometry === "arc") {
+          if (command.geometry === "arc" || override.motionModel === "differential-drive") {
             if (override.leftSpeed != null) command.leftSpeed = override.leftSpeed;
             if (override.rightSpeed != null) command.rightSpeed = override.rightSpeed;
             if (override.durationMs != null) command.durationMs = override.durationMs;
             command.manualWheelSpeeds = true;
+            command.motionModel = "differential-drive";
           } else {
             ensureMotorBaseline(command);
             if (override.speed != null) command.speed = override.speed;
@@ -76,6 +77,7 @@
           if (override.rightSpeed != null) command.rightSpeed = override.rightSpeed;
           if (override.durationMs != null) command.durationMs = override.durationMs;
           command.manualWheelSpeeds = true;
+          command.motionModel = override.motionModel || "differential-drive";
           updateManualTurnPose(command, index);
         } else if (command.type === "wait") {
           if (override.ms != null) command.ms = override.ms;
@@ -85,11 +87,12 @@
     }
 
     function commandOverrideFromCommand(command) {
-      if (command.type === "motor" && command.geometry === "arc" && command.manualWheelSpeeds) {
+      if (command.type === "motor" && (command.geometry === "arc" || command.motionModel === "differential-drive") && command.manualWheelSpeeds) {
         return {
           leftSpeed: command.leftSpeed,
           rightSpeed: command.rightSpeed,
           durationMs: command.durationMs,
+          motionModel: "differential-drive",
         };
       }
       if (command.type === "motor" && command.baseMotion) {
@@ -104,6 +107,7 @@
           leftSpeed: command.leftSpeed,
           rightSpeed: command.rightSpeed,
           durationMs: command.durationMs,
+          motionModel: command.motionModel || "differential-drive",
         };
       }
       if (command.type === "wait") {
@@ -119,11 +123,12 @@
       const role = command.role || "";
       const segmentId = command.segmentId || "";
       const kind = command.kind || "";
+      const commandFamily = command.type === "motor" || command.type === "turn" ? "motion" : command.type;
       const occurrence = commands
         .slice(0, index + 1)
         .filter((item) => item.type === command.type && (item.role || "") === role && (item.segmentId || "") === segmentId && (item.kind || "") === kind)
         .length;
-      return [command.type, kind, role, segmentId, occurrence].join("|");
+      return [commandFamily, kind, role, segmentId, occurrence].join("|");
     }
 
     function renderToioCommandOutput() {
@@ -328,6 +333,7 @@
       if (command.type === "motor" && command.geometry === "arc") {
         if (key === "leftSpeed" || key === "rightSpeed") command[key] = clamp(value, -255, 255);
         if (key === "leftSpeed" || key === "rightSpeed" || key === "durationMs") command.manualWheelSpeeds = true;
+        command.motionModel = "differential-drive";
       } else if (command.type === "motor" && (key === "speed" || key === "durationMs" || key === "distanceScale")) {
         if (key !== "distanceScale") command.distanceScale = motorDistanceScale(command);
         command.leftSpeed = command.speed;
@@ -336,6 +342,7 @@
       }
       if (command.type === "turn" && (key === "leftSpeed" || key === "rightSpeed" || key === "durationMs")) {
         command.manualWheelSpeeds = true;
+        command.motionModel = "differential-drive";
         updateManualTurnPose(command, index);
       }
       reflowDeadLineCommandPath();
@@ -412,6 +419,34 @@
         }
         if (command.type === "turn") {
           if (!currentCube && command.x != null && command.y != null) currentCube = { x: command.x, y: command.y };
+          if (command.motionModel === "differential-drive" && currentCube) {
+            const start = { ...currentCube };
+            const startTheta = currentTheta ?? command.startTheta ?? (command.theta - (command.angle || 0));
+            const result = deadMotion.integrateDifferentialDrive(
+              start,
+              startTheta,
+              command.leftSpeed,
+              command.rightSpeed,
+              command.durationMs,
+              command,
+              config,
+            );
+            command.x = result.x;
+            command.y = result.y;
+            command.fromX = start.x;
+            command.fromY = start.y;
+            command.startTheta = startTheta;
+            command.theta = normalizeDegrees(result.theta);
+            command.angle = signedThetaDelta(startTheta, command.theta);
+            command.penPreviewPoints = deadMotion.differentialPreviewPoints(start, startTheta, command.leftSpeed, command.rightSpeed, command.durationMs, command, config)
+              .map((point) => cubeToPen(point, point.theta, config));
+            currentCube = { x: result.x, y: result.y };
+            currentTheta = command.theta;
+            currentPen = cubeToPen(currentCube, currentTheta, config);
+            command.penX = currentPen.x;
+            command.penY = currentPen.y;
+            continue;
+          }
           const theta = command.theta ?? currentTheta ?? 0;
           command.theta = theta;
           if (currentCube) {
@@ -425,13 +460,61 @@
           continue;
         }
         if (command.type !== "motor") continue;
-        if (command.geometry !== "line") {
+        if (command.geometry === "arc" || command.motionModel === "differential-drive") {
+          const start = currentCube || { x: command.fromX, y: command.fromY };
+          if (!start || start.x == null || start.y == null) continue;
+          const startTheta = currentTheta ?? command.startTheta ?? command.theta ?? 0;
+          const result = deadMotion.integrateDifferentialDrive(start, startTheta, command.leftSpeed, command.rightSpeed, command.durationMs, command, config);
+          const points = deadMotion.differentialPreviewPoints(start, startTheta, command.leftSpeed, command.rightSpeed, command.durationMs, command, config);
+          const deltaTheta = signedThetaDelta(startTheta, result.theta);
+          const geometry = Math.abs(result.angularRadPerSec) < 1e-9 ? "line" : "arc";
+          command.motionModel = "differential-drive";
+          command.fromX = start.x;
+          command.fromY = start.y;
+          command.startTheta = startTheta;
+          command.x = result.x;
+          command.y = result.y;
+          command.theta = normalizeDegrees(result.theta);
+          command.geometry = geometry;
+          if (geometry === "arc" && Math.abs((result.leftMmPerSec + result.rightMmPerSec) / 2) < 1e-9) {
+            command.type = "turn";
+            delete command.geometry;
+          } else {
+            command.type = "motor";
+          }
+          command.penPreviewPoints = points.map((point) => cubeToPen(point, point.theta, config));
+          command.cubePreviewPoints = points.map((point) => ({ x: point.x, y: point.y, theta: normalizeDegrees(point.theta) }));
+          if (geometry === "arc") {
+            const signedRadius = (result.leftMmPerSec + result.rightMmPerSec) / 2 / result.angularRadPerSec;
+            const radius = Math.abs(signedRadius);
+            const center = {
+              x: start.x - signedRadius * Math.sin(degToRad(startTheta)),
+              y: start.y + signedRadius * Math.cos(degToRad(startTheta)),
+            };
+            command.radius = radius;
+            command.sweepAngle = deltaTheta;
+            command.center = center;
+            command.startAngle = Math.atan2(start.y - center.y, start.x - center.x) * 180 / Math.PI;
+          } else {
+            delete command.center;
+            delete command.radius;
+            delete command.startAngle;
+            delete command.sweepAngle;
+          }
+          currentCube = { x: result.x, y: result.y };
+          currentTheta = command.theta;
+          currentPen = cubeToPen(currentCube, currentTheta, config);
+          command.penX = currentPen.x;
+          command.penY = currentPen.y;
+          continue;
+        }
+        if (command.geometry !== "line" && command.kind !== "travel") {
           if (command.x != null && command.y != null) currentCube = { x: command.x, y: command.y };
           if (command.theta != null) currentTheta = command.theta;
           if (command.penX != null) currentPen = { x: command.penX, y: command.penY };
           continue;
         }
-        const theta = command.theta ?? currentTheta ?? 0;
+        const theta = currentTheta ?? command.theta ?? 0;
         const startCube = currentCube || (currentPen ? penToCube(currentPen, theta, config) : { x: command.fromX ?? command.x, y: command.fromY ?? command.y });
         if (!startCube || startCube.x == null || startCube.y == null) continue;
         const distanceMm = deadMotion.deadLineMotionDistanceMm(command, config);
@@ -491,6 +574,10 @@
       return angularSpeedDegPerSec * ((command.durationMs || 0) / 1000);
     }
 
+    function signedThetaDelta(from, to) {
+      return ((to - from + 540) % 360) - 180;
+    }
+
     return {
       captureCommandOverrides,
       applyCommandOverrides,
@@ -515,6 +602,7 @@
       reflowDeadLineCommandPath,
       turnStartThetaAtCommand,
       manualTurnAngle,
+      signedThetaDelta,
     };
   }
 

@@ -302,7 +302,7 @@
           if (command.state === "up") upPoints = eventPoint ? [eventPoint] : [];
           penDown = command.state === "down";
         }
-        if (command.type === "motor" && command.geometry === "arc" && Array.isArray(command.penPreviewPoints)) {
+        if ((command.type === "motor" || command.type === "turn") && Array.isArray(command.penPreviewPoints)) {
           for (const point of command.penPreviewPoints) {
             if (penDown) {
               downPoints.push(point);
@@ -312,7 +312,7 @@
             }
             lastPenPoint = point;
           }
-        } else if ((command.type === "move" || command.type === "motor") && command.penX != null) {
+        } else if ((command.type === "move" || command.type === "motor" || command.type === "turn") && command.penX != null) {
           const point = { x: command.penX, y: command.penY };
           if (penDown) {
             downPoints.push(point);
@@ -436,8 +436,12 @@
     }
 
     function replayTurnCommand(command, state, config) {
+      if (Array.isArray(command.cubePreviewPoints) && Array.isArray(command.penPreviewPoints)) {
+        replayPreviewPointArrays(command, state);
+        return;
+      }
       const theta = command.theta ?? state.currentTheta ?? 0;
-      if (command.x != null && command.y != null) {
+      if (!state.currentCube && command.x != null && command.y != null) {
         state.currentCube = { x: command.x, y: command.y };
       }
       if (!state.currentCube) {
@@ -457,13 +461,15 @@
     }
 
     function replayMotorCommand(command, state, config) {
-      if (command.geometry === "arc" && Array.isArray(command.cubePreviewPoints) && Array.isArray(command.penPreviewPoints)) {
+      if (Array.isArray(command.cubePreviewPoints) && Array.isArray(command.penPreviewPoints)) {
         replayPreviewPointArrays(command, state);
         return;
       }
 
       const theta = command.theta ?? state.currentTheta ?? 0;
+      const chainedCommand = command.kind === "travel" || command.motionModel === "differential-drive";
       const startCube =
+        (chainedCommand ? state.currentCube : null) ||
         finitePoint(command.fromX, command.fromY) ||
         state.currentCube ||
         (state.currentPen ? penToCube(state.currentPen, theta, config) : null) ||
