@@ -8,15 +8,15 @@
         {
           "kind": "arc",
           "center": { "x": 210, "y": 250 },
-          "radius": 14,
-          "startAngle": 106.3,
+          "radius": 45.837434,
+          "startAngle": 156.427173,
           "sweepAngle": -180
         },
         {
           "kind": "arc",
           "center": { "x": 310, "y": 250 },
-          "radius": 14,
-          "startAngle": 253.7,
+          "radius": 45.837434,
+          "startAngle": 203.572827,
           "sweepAngle": 180
         }
       ],

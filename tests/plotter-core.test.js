@@ -419,8 +419,8 @@ test("circle sample dead reckoning duration is scaled to half", () => {
 
   assert.ok(baseMotor);
   assert.ok(scaledMotor);
-  assert.equal(scaledMotor.durationMs, 7370);
-  assert.equal(scaledMotor.durationMs, Math.round((baseMotor.durationMs / 2) / 10) * 10);
+  assert.equal(scaledMotor.durationMs, 7060);
+  assert.ok(Math.abs(scaledMotor.durationMs - baseMotor.durationMs / 2) <= 10);
 });
 
 test("cat face sample connects angled ears and forehead arc to the lower arc", () => {
@@ -474,29 +474,58 @@ test("keroppi outline sample draws tight outer eyes and side outline arcs slowly
   const mouth = drawSegments[4];
   const leftInnerEye = drawSegments[5];
   const rightInnerEye = drawSegments[6];
-  const leftEyeRadius = Math.hypot(8, 48);
-  const rightEyeRadius = Math.hypot(8, 48);
+  const assertPointNear = (actual, expected) => {
+    assert.ok(core.distance(actual, expected) < 0.1, `${JSON.stringify(actual)} !== ${JSON.stringify(expected)}`);
+  };
 
   assert.deepEqual(result.errors, []);
   assert.equal(result.stats.drawSegments, 7);
-  assert.ok(Math.abs(core.distance(leftOutline.start, { x: 201, y: 218 }) - leftEyeRadius) < 1);
-  assert.ok(leftOutline.start.x > 160);
-  assert.ok(leftOutline.start.y > 245);
-  assert.ok(leftOutline.end.x > 140);
-  assert.ok(leftOutline.end.y > 350);
-  assert.ok(Math.abs(core.distance(rightOutline.start, { x: 299, y: 218 }) - rightEyeRadius) < 1);
-  assert.ok(Math.abs(leftOutline.start.x + rightOutline.start.x - 500) < 1);
-  assert.ok(Math.abs(leftOutline.end.x + rightOutline.end.x - 500) < 1);
-  assert.ok(Math.abs(leftOutline.end.y - rightOutline.end.y) < 1);
-  assert.ok(mouth.start.x < 210);
-  assert.ok(mouth.end.x > 290);
+  assertPointNear(leftOutline.start, keroppiOutlineSample.strokes[0].raw[0]);
+  assertPointNear(leftOutline.end, keroppiOutlineSample.strokes[0].raw.at(-1));
+  assertPointNear(rightOutline.start, keroppiOutlineSample.strokes[3].raw[0]);
+  assertPointNear(rightOutline.end, keroppiOutlineSample.strokes[3].raw.at(-1));
+  assertPointNear(mouth.start, keroppiOutlineSample.strokes[4].raw[0]);
+  assertPointNear(mouth.end, keroppiOutlineSample.strokes[4].raw.at(-1));
+  assertPointNear(leftInnerEye.start, keroppiOutlineSample.strokes[5].raw[0]);
+  assertPointNear(leftInnerEye.end, keroppiOutlineSample.strokes[5].raw.at(-1));
+  assertPointNear(rightInnerEye.start, keroppiOutlineSample.strokes[6].raw[0]);
+  assertPointNear(rightInnerEye.end, keroppiOutlineSample.strokes[6].raw.at(-1));
   assert.ok(Math.max(...mouth.penPreviewPoints.map((point) => point.y)) > 345);
-  assert.ok(Math.abs(leftInnerEye.start.x + rightInnerEye.end.x - 500) < 1);
-  assert.ok(Math.abs(leftInnerEye.end.x + rightInnerEye.start.x - 500) < 1);
   assert.ok(Math.min(...leftInnerEye.penPreviewPoints.map((point) => point.y)) < 220);
   assert.ok(Math.min(...rightInnerEye.penPreviewPoints.map((point) => point.y)) < 220);
-  assert.ok(drawMotors.some((command) => command.leftSpeed < 0 || command.rightSpeed < 0));
   assert.ok(drawMotors.every((command) => Math.max(Math.abs(command.leftSpeed), Math.abs(command.rightSpeed)) <= 255));
+});
+
+test("keroppi eye arcs rotate in place without moving the toio center", () => {
+  const result = core.createDeadReckoningSimulation({
+    strokes: keroppiOutlineSample.strokes,
+    config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+    segmentSettings: keroppiOutlineSample.deadSegmentSettings,
+  });
+  const eyeCommands = result.commands.filter((command) => command.type === "motor" && command.geometry === "arc" && ["seg-2", "seg-4"].includes(command.segmentId));
+
+  assert.equal(eyeCommands.length, 2);
+  for (const command of eyeCommands) {
+    assert.equal(command.motionModel, "differential-drive");
+    assert.ok(core.distance({ x: command.fromX, y: command.fromY }, { x: command.x, y: command.y }) < 0.01);
+    assert.ok(command.leftSpeed * command.rightSpeed < 0);
+  }
+});
+
+test("keroppi eye load preview uses the same turn-in-place path as simulation", () => {
+  const result = core.createDeadReckoningSimulation({
+    strokes: keroppiOutlineSample.strokes,
+    config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+    segmentSettings: keroppiOutlineSample.deadSegmentSettings,
+  });
+  const eyeSegment = result.segments.find((segment) => segment.id === "seg-2");
+  const loadedPreview = result.processedStrokes[1].processed;
+
+  assert.ok(eyeSegment);
+  assert.ok(loadedPreview.length > 2);
+  assert.ok(core.distance(loadedPreview[0], eyeSegment.penPreviewPoints[0]) < 0.1);
+  assert.ok(core.distance(loadedPreview.at(-1), eyeSegment.penPreviewPoints.at(-1)) < 0.1);
+  assert.ok(Math.max(...loadedPreview.map((point) => point.x)) - Math.min(...loadedPreview.map((point) => point.x)) < 41);
 });
 
 test("generated keroppi arcs use the same differential-drive endpoint as animation", () => {

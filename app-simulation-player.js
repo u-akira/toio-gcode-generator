@@ -38,6 +38,7 @@
       const activeItem = animation.timeline.items.find((item) => item.commandIndex === activeCommandIndex) || null;
       return {
         elapsedMs,
+        durationMs: animation.durationMs,
         activeCommandIndex,
         commandDurationMs: activeItem ? activeItem.endMs - activeItem.startMs : null,
         items: animation.timeline.items.map((item) => ({

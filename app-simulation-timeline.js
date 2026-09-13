@@ -123,6 +123,32 @@
     function partialDeadCommand(item, elapsedMs) {
       const command = item.command;
       const config = getConfig();
+      if (command.type === "motor" && command.turnInPlace && command.geometry === "arc" && command.center && command.sweepAngle != null) {
+        const span = Math.max(1, item.endMs - item.startMs);
+        const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
+        const startTheta = command.startTheta ?? item.fromCubePose?.theta ?? 0;
+        const theta = normalizeDegrees(startTheta + command.sweepAngle * t);
+        const center = { x: command.center.x, y: command.center.y };
+        const penPoint = cubeToPen(center, theta, config);
+        const previewEnd = (points, currentPoint) => {
+          if (!Array.isArray(points) || !points.length) return points;
+          const lastCompletedIndex = Math.floor((points.length - 1) * t);
+          const result = points.slice(0, lastCompletedIndex + 1);
+          const last = result[result.length - 1];
+          if (!last || Math.hypot(last.x - currentPoint.x, last.y - currentPoint.y) >= 0.01) result.push(currentPoint);
+          return result;
+        };
+        return {
+          ...command,
+          x: center.x,
+          y: center.y,
+          theta,
+          penX: penPoint.x,
+          penY: penPoint.y,
+          cubePreviewPoints: previewEnd(command.cubePreviewPoints, { ...center, theta }),
+          penPreviewPoints: previewEnd(command.penPreviewPoints, penPoint),
+        };
+      }
       if ((command.type === "turn" || command.type === "motor") && command.motionModel === "differential-drive" && (command.fromX != null || (command.type === "turn" && command.x != null))) {
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);

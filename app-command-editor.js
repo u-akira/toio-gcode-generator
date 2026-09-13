@@ -18,6 +18,7 @@
       clamp,
       minTurnDurationMs,
       turnWheelSpeeds,
+      computeArcWheelSpeedsForDuration,
       turnMsPer90,
       penToCube,
       cubeToPen,
@@ -332,6 +333,22 @@
       command[key] = value;
       if (command.type === "motor" && command.geometry === "arc") {
         if (key === "leftSpeed" || key === "rightSpeed") command[key] = clamp(value, -255, 255);
+        if (key === "durationMs" && !command.turnInPlace && computeArcWheelSpeedsForDuration) {
+          const config = getConfig();
+          const wheelBaseMm = Math.max(1, Number(config.deadWheelBaseMm) || 26);
+          const baseSpeed = command.kind === "draw" ? config.drawSpeed : config.travelSpeed;
+          const baseMmPerSec = command.kind === "draw" ? config.deadArcMmPerSecAtDrawSpeed : config.deadMmPerSecAtTravelSpeed;
+          const speeds = computeArcWheelSpeedsForDuration(
+            command.radius,
+            command.sweepAngle,
+            command.durationMs,
+            wheelBaseMm,
+            baseSpeed,
+            baseMmPerSec,
+          );
+          command.leftSpeed = speeds.left;
+          command.rightSpeed = speeds.right;
+        }
         if (key === "leftSpeed" || key === "rightSpeed" || key === "durationMs") command.manualWheelSpeeds = true;
         command.motionModel = "differential-drive";
       } else if (command.type === "motor" && (key === "speed" || key === "durationMs" || key === "distanceScale")) {
@@ -407,6 +424,7 @@
       let currentPen = null;
       let currentCube = null;
       let currentTheta = null;
+      let preserveTravelTargets = false;
       for (const command of simulation.commands) {
         if (command.type === "pen") {
           if (currentPen && command.penX != null) {
@@ -460,7 +478,23 @@
           continue;
         }
         if (command.type !== "motor") continue;
+        if (command.turnInPlace && command.geometry === "arc" && command.center && command.sweepAngle != null) {
+          const startTheta = currentTheta ?? command.startTheta ?? command.theta ?? 0;
+          command.fromX = command.center.x;
+          command.fromY = command.center.y;
+          command.x = command.center.x;
+          command.y = command.center.y;
+          command.startTheta = startTheta;
+          command.theta = normalizeDegrees(startTheta + command.sweepAngle);
+          currentCube = { x: command.center.x, y: command.center.y };
+          currentTheta = command.theta;
+          currentPen = cubeToPen(currentCube, currentTheta, config);
+          command.penX = currentPen.x;
+          command.penY = currentPen.y;
+          continue;
+        }
         if (command.geometry === "arc" || command.motionModel === "differential-drive") {
+          preserveTravelTargets = preserveTravelTargets || command.geometry === "arc";
           const start = currentCube || { x: command.fromX, y: command.fromY };
           if (!start || start.x == null || start.y == null) continue;
           const startTheta = currentTheta ?? command.startTheta ?? command.theta ?? 0;
@@ -518,10 +552,12 @@
         const startCube = currentCube || (currentPen ? penToCube(currentPen, theta, config) : { x: command.fromX ?? command.x, y: command.fromY ?? command.y });
         if (!startCube || startCube.x == null || startCube.y == null) continue;
         const distanceMm = deadMotion.deadLineMotionDistanceMm(command, config);
-        const endCube = {
-          x: startCube.x + Math.cos(degToRad(theta)) * distanceMm,
-          y: startCube.y + Math.sin(degToRad(theta)) * distanceMm,
-        };
+        const endCube = preserveTravelTargets && command.kind === "travel" && command.x != null && command.y != null
+          ? { x: command.x, y: command.y }
+          : {
+              x: startCube.x + Math.cos(degToRad(theta)) * distanceMm,
+              y: startCube.y + Math.sin(degToRad(theta)) * distanceMm,
+            };
         command.fromX = startCube.x;
         command.fromY = startCube.y;
         command.x = endCube.x;

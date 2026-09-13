@@ -22,9 +22,9 @@
       "primitives": [
         {
           "kind": "arc",
-          "center": { "x": 250, "y": 315 },
-          "radius": 100,
-          "startAngle": 192,
+          "center": { "x": 249.810483, "y": 319.23643 },
+          "radius": 107.000133,
+          "startAngle": 208.231992,
           "sweepAngle": -58
         }
       ],
@@ -38,9 +38,10 @@
       "primitives": [
         {
           "kind": "arc",
+          "motionModel": "turn-in-place",
           "center": { "x": 201, "y": 218 },
-          "radius": 8,
-          "startAngle": 180,
+          "radius": 44.732538,
+          "startAngle": 294.089506,
           "sweepAngle": 360
         }
       ],
@@ -56,9 +57,10 @@
       "primitives": [
         {
           "kind": "arc",
+          "motionModel": "turn-in-place",
           "center": { "x": 299, "y": 218 },
-          "radius": 8,
-          "startAngle": 180,
+          "radius": 44.732538,
+          "startAngle": 294.089506,
           "sweepAngle": 360
         }
       ],
@@ -74,9 +76,9 @@
       "primitives": [
         {
           "kind": "arc",
-          "center": { "x": 250, "y": 315 },
-          "radius": 100,
-          "startAngle": 348,
+          "center": { "x": 250.189517, "y": 319.23643 },
+          "radius": 107.000133,
+          "startAngle": 331.768008,
           "sweepAngle": 58
         }
       ],
@@ -90,9 +92,9 @@
       "primitives": [
         {
           "kind": "arc",
-          "center": { "x": 250, "y": 270 },
-          "radius": 64,
-          "startAngle": 103.13,
+          "center": { "x": 250, "y": 269.814922 },
+          "radius": 77.077313,
+          "startAngle": 125.453709,
           "sweepAngle": -100
         }
       ],
@@ -107,8 +109,8 @@
         {
           "kind": "arc",
           "center": { "x": 204, "y": 266 },
-          "radius": 9.85,
-          "startAngle": 303.4,
+          "radius": 45.276926,
+          "startAngle": 248.832299,
           "sweepAngle": 90
         }
       ],
@@ -123,8 +125,8 @@
         {
           "kind": "arc",
           "center": { "x": 296, "y": 266 },
-          "radius": 9.85,
-          "startAngle": 303.4,
+          "radius": 45.276926,
+          "startAngle": 248.832299,
           "sweepAngle": 90
         }
       ],

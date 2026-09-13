@@ -228,6 +228,7 @@ const commandEditor = window.ToioPlotterCommandEditor.createCommandEditor({
   clamp,
   minTurnDurationMs: MIN_TURN_DURATION_MS,
   turnWheelSpeeds,
+  computeArcWheelSpeedsForDuration: window.PlotterCore.computeArcWheelSpeedsForDuration,
   turnMsPer90,
   penToCube: window.PlotterCore.penToCube,
   cubeToPen,
