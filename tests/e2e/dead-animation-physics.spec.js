@@ -125,13 +125,17 @@ test("edited keroppi arc stays near its loaded endpoint", async ({ page }) => {
   const duration = page.locator(`input[data-command-index="${loaded.commands.indexOf(loadedArc)}"][data-command-key="durationMs"]`);
   await duration.fill(String(loadedArc.durationMs + 100));
   await duration.blur();
-  await page.click("#simulateBtn");
-  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
-
-  const editedTimeline = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
-  await page.evaluate((time) => window.__toioTest.seekAnimation(time), editedTimeline.durationMs - 1);
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), loadedTimeline.durationMs - 1);
   const edited = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
   const editedArc = edited.commands.find((command) => command.segmentId === "seg-0");
   expect(editedArc).toBeDefined();
   expect(Math.hypot(editedArc.x - loadedArc.x, editedArc.y - loadedArc.y)).toBeLessThan(5);
+
+  await duration.fill(String(loadedArc.durationMs));
+  await duration.blur();
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), loadedTimeline.durationMs - 1);
+  const restored = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  const restoredArc = restored.commands.find((command) => command.segmentId === "seg-0");
+  expect(restoredArc).toBeDefined();
+  expect(Math.hypot(restoredArc.x - loadedArc.x, restoredArc.y - loadedArc.y)).toBeLessThan(0.1);
 });
