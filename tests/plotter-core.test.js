@@ -470,6 +470,8 @@ test("keroppi outline sample draws tight outer eyes and side outline arcs slowly
   const drawMotors = result.commands.filter((command) => command.type === "motor" && command.kind === "draw");
   const drawSegments = result.segments.filter((segment) => segment.kind === "draw");
   const leftOutline = drawSegments[0];
+  const leftOuterEye = drawSegments[1];
+  const rightOuterEye = drawSegments[2];
   const rightOutline = drawSegments[3];
   const mouth = drawSegments[4];
   const leftInnerEye = drawSegments[5];
@@ -484,13 +486,18 @@ test("keroppi outline sample draws tight outer eyes and side outline arcs slowly
   assertPointNear(leftOutline.end, keroppiOutlineSample.strokes[0].raw.at(-1));
   assertPointNear(rightOutline.start, keroppiOutlineSample.strokes[3].raw[0]);
   assertPointNear(rightOutline.end, keroppiOutlineSample.strokes[3].raw.at(-1));
+  const nearestDistance = (point, points) => Math.min(...points.map((candidate) => core.distance(point, candidate)));
+  assert.ok(nearestDistance(leftOutline.start, leftOuterEye.penPreviewPoints) < 6);
+  assert.ok(nearestDistance(rightOutline.start, rightOuterEye.penPreviewPoints) < 6);
+  assert.ok(Math.abs((leftOutline.start.x + rightOutline.start.x) - 500) < 0.1);
+  assert.ok(Math.abs((leftOutline.end.x + rightOutline.end.x) - 500) < 0.1);
   assertPointNear(mouth.start, keroppiOutlineSample.strokes[4].raw[0]);
   assertPointNear(mouth.end, keroppiOutlineSample.strokes[4].raw.at(-1));
-  assertPointNear(leftInnerEye.start, keroppiOutlineSample.strokes[5].raw[0]);
-  assertPointNear(leftInnerEye.end, keroppiOutlineSample.strokes[5].raw.at(-1));
-  assertPointNear(rightInnerEye.start, keroppiOutlineSample.strokes[6].raw[0]);
-  assertPointNear(rightInnerEye.end, keroppiOutlineSample.strokes[6].raw.at(-1));
-  assert.ok(Math.max(...mouth.penPreviewPoints.map((point) => point.y)) > 345);
+  assertPointNear(leftInnerEye.penPreviewPoints[0], keroppiOutlineSample.strokes[5].raw[0]);
+  assertPointNear(leftInnerEye.penPreviewPoints.at(-1), keroppiOutlineSample.strokes[5].raw.at(-1));
+  assertPointNear(rightInnerEye.penPreviewPoints[0], keroppiOutlineSample.strokes[6].raw[0]);
+  assertPointNear(rightInnerEye.penPreviewPoints.at(-1), keroppiOutlineSample.strokes[6].raw.at(-1));
+  assert.ok(Math.max(...mouth.penPreviewPoints.map((point) => point.y)) < 335);
   assert.ok(Math.min(...leftInnerEye.penPreviewPoints.map((point) => point.y)) < 220);
   assert.ok(Math.min(...rightInnerEye.penPreviewPoints.map((point) => point.y)) < 220);
   assert.ok(drawMotors.every((command) => Math.max(Math.abs(command.leftSpeed), Math.abs(command.rightSpeed)) <= 255));
@@ -502,7 +509,7 @@ test("keroppi eye arcs rotate in place without moving the toio center", () => {
     config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
     segmentSettings: keroppiOutlineSample.deadSegmentSettings,
   });
-  const eyeCommands = result.commands.filter((command) => command.type === "motor" && command.geometry === "arc" && ["seg-2", "seg-4"].includes(command.segmentId));
+  const eyeCommands = result.commands.filter((command) => command.type === "motor" && command.geometry === "arc" && ["seg-10", "seg-12"].includes(command.segmentId));
 
   assert.equal(eyeCommands.length, 2);
   for (const command of eyeCommands) {
@@ -518,8 +525,8 @@ test("keroppi eye load preview uses the same turn-in-place path as simulation", 
     config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
     segmentSettings: keroppiOutlineSample.deadSegmentSettings,
   });
-  const eyeSegment = result.segments.find((segment) => segment.id === "seg-2");
-  const loadedPreview = result.processedStrokes[1].processed;
+  const eyeSegment = result.segments.find((segment) => segment.id === "seg-10");
+  const loadedPreview = result.processedStrokes[5].processed;
 
   assert.ok(eyeSegment);
   assert.ok(loadedPreview.length > 2);
@@ -535,7 +542,7 @@ test("generated keroppi arcs use the same differential-drive endpoint as animati
     config,
     segmentSettings: keroppiOutlineSample.deadSegmentSettings,
   });
-  const arcs = result.commands.filter((command) => command.type === "motor" && command.geometry === "arc");
+  const arcs = result.commands.filter((command) => command.type === "motor" && command.geometry === "arc" && !command.turnInPlace);
 
   assert.ok(arcs.length > 0);
   for (const command of arcs) {

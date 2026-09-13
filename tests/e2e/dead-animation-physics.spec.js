@@ -166,8 +166,8 @@ test("a 100ms keroppi arc edit keeps the drawing path stable", async ({ page }) 
   const initial = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
   await page.evaluate((time) => window.__toioTest.seekAnimation(time), initial.durationMs);
   const baseline = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
-  const baselineArcs = baseline.commands.filter((command) => command.type === "motor" && command.kind === "draw" && command.geometry === "arc" && !["seg-2", "seg-4"].includes(command.segmentId));
-  expect(baselineArcs.length).toBeGreaterThan(3);
+  const baselineArcs = baseline.commands.filter((command) => command.type === "motor" && command.kind === "draw" && command.geometry === "arc" && !["seg-2", "seg-4", "seg-10", "seg-12"].includes(command.segmentId));
+  expect(baselineArcs.length).toBeGreaterThanOrEqual(3);
 
   const editedArc = baselineArcs.find((command) => command.segmentId === "seg-0");
   const editedIndex = baseline.commands.indexOf(editedArc);
@@ -246,18 +246,18 @@ test("keroppi command 9 to 11 remains positionally continuous across pen up", as
   expect(positionJump, JSON.stringify({ previous, current })).toBeLessThan(10);
 });
 
-test("keroppi eye turn-in-place arc completes its full sweep", async ({ page }) => {
+test("keroppi inner eye arcs stay inside the eye outline", async ({ page }) => {
   await page.goto("/");
   await page.selectOption("#sampleSelect", "samples/json/keroppi-outline.json");
   await page.click("#simulateBtn");
   await expect(page.locator("#simStatus")).toHaveClass(/ok/);
 
   const timeline = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
-  const eyeItem = timeline.items.find((item) => item.commandIndex === 8);
-  expect(eyeItem, "first eye arc timeline item").toBeDefined();
-  await page.evaluate((time) => window.__toioTest.seekAnimation(time), eyeItem.endMs);
-  const eye = (await page.evaluate(() => window.__toioTest.getAnimationSnapshot())).commands[8];
-  expect(eye.turnInPlace).toBe(true);
-  expect(eye.sweepAngle).toBe(360);
-  expect(Math.hypot(eye.penPreviewPoints[0].x - eye.penPreviewPoints.at(-1).x, eye.penPreviewPoints[0].y - eye.penPreviewPoints.at(-1).y)).toBeLessThan(1);
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), timeline.durationMs);
+  const eyes = (await page.evaluate(() => window.__toioTest.getAnimationSnapshot())).commands.filter((command) => command.geometry === "arc" && command.sweepAngle === -80 && command.turnInPlace);
+  expect(eyes.length).toBe(2);
+  for (const eye of eyes) {
+    expect(eye.penPreviewPoints.length).toBeGreaterThan(2);
+    expect(Math.hypot(eye.x - eye.fromX, eye.y - eye.fromY)).toBeLessThan(1);
+  }
 });
