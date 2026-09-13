@@ -17,6 +17,7 @@
 
     let animation = null;
     let activeCommandIndex = -1;
+    let completedCommands = null;
 
     function getAnimation() {
       return animation;
@@ -67,7 +68,7 @@
     }
 
     function getAnimatedCommands() {
-      if (!animation) return getCommands();
+      if (!animation) return completedCommands || getCommands();
       return timelineTools.commandsAtElapsed(animation.timeline, getElapsedMs());
     }
 
@@ -94,6 +95,8 @@
 
     function finishAnimation() {
       if (!animation) return;
+      animation.elapsedMs = animation.durationMs;
+      completedCommands = timelineTools.commandsAtElapsed(animation.timeline, Math.max(0, animation.durationMs - 0.001));
       activeCommandIndex = timelineTools.lastPlayableCommandIndex(animation.timeline);
       animation = null;
       onControlsChanged();
@@ -115,6 +118,7 @@
     function start() {
       const commands = getCommands();
       if (!commands.length) return;
+      completedCommands = null;
       const timeline = timelineTools.buildSimulationTimeline(commands);
       animation = createAnimation(timeline, 0, true);
       animation.frameId = requestFrame(tick);
@@ -124,6 +128,7 @@
     function stop() {
       cancelPendingFrame();
       animation = null;
+      completedCommands = null;
       activeCommandIndex = -1;
       onControlsChanged();
       onActiveCommandChanged();
@@ -151,6 +156,7 @@
       if (!animation) {
         const timeline = timelineTools.buildSimulationTimeline(commands);
         if (!timeline.items.length) return;
+        completedCommands = null;
         animation = createAnimation(timeline, 0, false);
       }
       cancelPendingFrame();
@@ -173,6 +179,7 @@
       const commands = getCommands();
       if (!commands.length) return false;
       cancelPendingFrame();
+      completedCommands = null;
       const timeline = timelineTools.buildSimulationTimeline(commands);
       const item = timelineTools.timelineItemForCommand(timeline, index);
       if (!item && !options.allowMissing) return false;

@@ -367,9 +367,16 @@
         upPoints: [],
       };
 
-      for (const command of commands || []) {
+      const commandList = commands || [];
+      for (let commandIndex = 0; commandIndex < commandList.length; commandIndex += 1) {
+        const command = commandList[commandIndex];
         if (command.type === "pen") {
-          const eventPoint = commandPointOrCurrentPen(command, state);
+          const nextDraw = command.state === "down"
+            ? commandList.slice(commandIndex + 1).find((candidate) => candidate.type === "motor" && candidate.kind === "draw" && Array.isArray(candidate.penPreviewPoints))
+            : null;
+          const eventPoint = nextDraw?.penPreviewPoints?.[0]
+            ? { ...nextDraw.penPreviewPoints[0] }
+            : commandPointOrCurrentPen(command, state);
           flushPenPreviewSegment(state, state.penState === "down");
           if (eventPoint) {
             state.events.push({ ...eventPoint, state: command.state });

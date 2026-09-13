@@ -5,6 +5,237 @@ test.beforeEach(async ({ page }) => {
   await page.clock.install();
 });
 
+test("wave command 9 pen-down preview is exactly its arc", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#importInput").setInputFiles("data/wave-copy-paper.json");
+  await page.click("#simulateBtn");
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), 999999);
+  const commands = await page.evaluate(() => window.__toioTest.getCommands());
+  const preview = await page.evaluate(() => window.__toioTest.getDeadPreview());
+  const command9 = commands[8];
+  const command9Path = preview.segmentPenPaths.find(([segmentId]) => segmentId === command9.segmentId)?.[1];
+  expect(command9.type).toBe("motor");
+  expect(command9.kind).toBe("draw");
+  expect(command9.geometry).toBe("arc");
+  expect(command9Path).toBeDefined();
+  expect(command9Path.length).toBe(command9.penPreviewPoints.length);
+  for (let index = 0; index < command9Path.length; index += 1) {
+    expect(command9Path[index].x).toBeCloseTo(command9.penPreviewPoints[index].x, 6);
+    expect(command9Path[index].y).toBeCloseTo(command9.penPreviewPoints[index].y, 6);
+  }
+  const drawCommands = commands.filter((command) => command.type === "motor" && command.kind === "draw");
+  expect(preview.penDownSegments.length).toBe(drawCommands.length);
+  for (let index = 0; index < drawCommands.length; index += 1) {
+    const expected = drawCommands[index].penPreviewPoints;
+    const actual = preview.penDownSegments[index];
+    expect(actual.length).toBe(expected.length);
+    for (let pointIndex = 0; pointIndex < expected.length; pointIndex += 1) {
+      expect(Math.hypot(actual[pointIndex].x - expected[pointIndex].x, actual[pointIndex].y - expected[pointIndex].y)).toBeLessThan(0.1);
+    }
+  }
+  expect(preview.segmentPenPaths.length).toBeGreaterThan(0);
+  for (const [segmentId, path] of preview.segmentPenPaths) {
+    const drawCommand = commands.find((command) => command.type === "motor" && command.kind === "draw" && command.segmentId === segmentId);
+    expect(drawCommand, `unexpected pen-down path for ${segmentId}`).toBeDefined();
+    expect(path[0].x).toBeCloseTo(drawCommand.penPreviewPoints[0].x, 6);
+    expect(path[0].y).toBeCloseTo(drawCommand.penPreviewPoints[0].y, 6);
+    expect(path.at(-1).x).toBeCloseTo(drawCommand.penPreviewPoints.at(-1).x, 6);
+    expect(path.at(-1).y).toBeCloseTo(drawCommand.penPreviewPoints.at(-1).y, 6);
+  }
+  const timeline = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  const command9Item = timeline.items.find((item) => item.commandIndex === 8);
+  expect(command9Item).toBeDefined();
+  const midTime = command9Item.startMs + (command9Item.endMs - command9Item.startMs) / 2;
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), midTime);
+  const midSnapshot = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  const midPreview = await page.evaluate(() => window.__toioTest.getDeadPreview());
+  const midPath = midPreview.segmentPenPaths.find(([segmentId]) => segmentId === command9.segmentId)?.[1];
+  const midCommand9 = midSnapshot.commands[8];
+  expect(midPath).toBeDefined();
+  expect(Math.hypot(midPath.at(-1).x - midCommand9.penX, midPath.at(-1).y - midCommand9.penY)).toBeLessThan(0.1);
+});
+
+test("wave JSON Next to command 9 does not invent pen-down drawing", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#importInput").setInputFiles("data/wave-copy-paper.json");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  const before = await page.evaluate(() => ({ commands: window.__toioTest.getCommands(), preview: window.__toioTest.getDeadPreview() }));
+  for (let index = 0; index < 9; index += 1) await page.click("#simNextStepBtn");
+  const after = await page.evaluate(() => ({ commands: window.__toioTest.getCommands(), preview: window.__toioTest.getDeadPreview(), animation: window.__toioTest.getAnimationSnapshot() }));
+  expect(after.animation.activeCommandIndex).toBe(8);
+  expect(after.preview.penDownSegments.length).toBe(before.preview.penDownSegments.length);
+  const visibleDrawCommands = after.animation.commands.filter((command) => command.type === "motor" && command.kind === "draw");
+  expect(after.preview.penDownSegments.length).toBe(visibleDrawCommands.length);
+  for (let index = 0; index < visibleDrawCommands.length; index += 1) {
+    const expected = visibleDrawCommands[index].penPreviewPoints;
+    const actual = after.preview.penDownSegments[index];
+    expect(actual.length).toBeGreaterThanOrEqual(2);
+    expect(actual.length).toBeLessThanOrEqual(expected.length);
+    for (let pointIndex = 0; pointIndex < actual.length; pointIndex += 1) {
+      expect(Math.hypot(actual[pointIndex].x - expected[pointIndex].x, actual[pointIndex].y - expected[pointIndex].y)).toBeLessThan(0.1);
+    }
+  }
+});
+
+test("keroppi Next to command 9 does not invent pen-down drawing", async ({ page }) => {
+  await page.goto("/");
+  await page.selectOption("#sampleSelect", "samples/json/keroppi-outline.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  for (let index = 0; index < 9; index += 1) await page.click("#simNextStepBtn");
+  const after = await page.evaluate(() => ({ preview: window.__toioTest.getDeadPreview(), animation: window.__toioTest.getAnimationSnapshot() }));
+  const visibleDrawCommands = after.animation.commands.filter((command) => command.type === "motor" && command.kind === "draw");
+  expect(after.preview.penDownSegments.length).toBe(visibleDrawCommands.length);
+});
+
+test("editing wave command 9 does not add an uncommanded pen-down segment", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#importInput").setInputFiles("data/wave-copy-paper.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  const before = await page.evaluate(() => window.__toioTest.getCommands());
+  const duration = page.locator('input[data-command-index="8"][data-command-key="durationMs"]');
+  await duration.fill(String(Number(await duration.inputValue()) + 100));
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  const totalDuration = await page.evaluate(() => window.__toioTest.getAnimationSnapshot().durationMs);
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), totalDuration - 1);
+  const after = await page.evaluate(() => ({ commands: window.__toioTest.getCommands(), animation: window.__toioTest.getAnimationSnapshot(), preview: window.__toioTest.getDeadPreview() }));
+  const drawCommands = after.animation.commands.filter((command) => command.type === "motor" && command.kind === "draw");
+  expect(after.preview.penDownSegments.length).toBe(drawCommands.length);
+  expect(after.commands[8].durationMs).toBe(before[8].durationMs + 100);
+  for (let index = 0; index < drawCommands.length; index += 1) {
+    const expected = drawCommands[index].penPreviewPoints;
+    const actual = after.preview.penDownSegments[index];
+    expect(actual.length).toBe(expected.length);
+    for (let pointIndex = 0; pointIndex < expected.length; pointIndex += 1) {
+      expect(actual[pointIndex].x).toBeCloseTo(expected[pointIndex].x, 6);
+      expect(actual[pointIndex].y).toBeCloseTo(expected[pointIndex].y, 6);
+    }
+  }
+});
+
+test("completed wave simulation keeps the edited pen-down path", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#importInput").setInputFiles("data/wave-copy-paper.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  const duration = page.locator('input[data-command-index="8"][data-command-key="durationMs"]');
+  await duration.fill(String(Number(await duration.inputValue()) + 100));
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  const totalDuration = await page.evaluate(() => window.__toioTest.getAnimationSnapshot().durationMs);
+  await page.evaluate((elapsedMs) => window.__toioTest.seekAnimation(elapsedMs), totalDuration - 1);
+  const beforeFinish = await page.evaluate(() => window.__toioTest.getDeadPreview());
+  await page.click("#simPauseBtn");
+  await page.clock.runFor(100);
+  const result = await page.evaluate(() => ({ snapshot: window.__toioTest.getAnimationSnapshot(), preview: window.__toioTest.getDeadPreview() }));
+  expect(result.snapshot).toBeNull();
+  expect(result.preview.penDownSegments.length).toBe(beforeFinish.penDownSegments.length);
+  for (let index = 0; index < beforeFinish.penDownSegments.length; index += 1) {
+    const before = beforeFinish.penDownSegments[index].at(-1);
+    const after = result.preview.penDownSegments[index].at(-1);
+    expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeLessThan(0.1);
+  }
+});
+
+test("wave L/R edit followed immediately by Simulate keeps the edited drawing", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#importInput").setInputFiles("data/wave-copy-paper.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  const left = page.locator('input[data-command-index="8"][data-command-key="leftSpeed"]');
+  const right = page.locator('input[data-command-index="8"][data-command-key="rightSpeed"]');
+  await left.fill("26");
+  await right.fill("14");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  const totalDuration = await page.evaluate(() => window.__toioTest.getAnimationSnapshot().durationMs);
+  await page.evaluate((elapsedMs) => window.__toioTest.seekAnimation(elapsedMs), totalDuration - 1);
+  const beforeFinish = await page.evaluate(() => window.__toioTest.getDeadPreview());
+  await page.click("#simPauseBtn");
+  await page.clock.runFor(100);
+  const result = await page.evaluate(() => ({ commands: window.__toioTest.getCommands(), preview: window.__toioTest.getDeadPreview() }));
+  expect(result.commands[8].leftSpeed).toBe(26);
+  expect(result.commands[8].rightSpeed).toBe(14);
+  expect(result.preview.penDownSegments.length).toBe(beforeFinish.penDownSegments.length);
+  for (let index = 0; index < beforeFinish.penDownSegments.length; index += 1) {
+    const before = beforeFinish.penDownSegments[index].at(-1);
+    const after = result.preview.penDownSegments[index].at(-1);
+    expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeLessThan(0.1);
+  }
+});
+
+test("completed animation keeps the command-executed drawing instead of reload preview", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#importInput").setInputFiles("data/wave-copy-paper.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  const duration = page.locator('input[data-command-index="8"][data-command-key="durationMs"]');
+  await duration.fill(String(Number(await duration.inputValue()) + 100));
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const totalDuration = await page.evaluate(() => window.__toioTest.getAnimationSnapshot().durationMs);
+  await page.evaluate((elapsedMs) => window.__toioTest.seekAnimation(elapsedMs), totalDuration - 1);
+  const beforeFinish = await page.evaluate(() => window.__toioTest.getDeadPreview());
+  await page.click("#simPauseBtn");
+  await page.clock.runFor(100);
+  const afterFinish = await page.evaluate(() => ({ snapshot: window.__toioTest.getAnimationSnapshot(), preview: window.__toioTest.getDeadPreview() }));
+
+  expect(afterFinish.snapshot).toBeNull();
+  expect(afterFinish.preview.penDownSegments.length).toBe(beforeFinish.penDownSegments.length);
+  for (let index = 0; index < beforeFinish.penDownSegments.length; index += 1) {
+    const before = beforeFinish.penDownSegments[index].at(-1);
+    const after = afterFinish.preview.penDownSegments[index].at(-1);
+    expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeLessThan(0.1);
+  }
+});
+
+test("completed animation does not teleport the cube from its last animated pose", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#importInput").setInputFiles("data/wave-copy-paper.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  const duration = page.locator('input[data-command-index="8"][data-command-key="durationMs"]');
+  await duration.fill(String(Number(await duration.inputValue()) + 100));
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const totalDuration = await page.evaluate(() => window.__toioTest.getAnimationSnapshot().durationMs);
+  await page.evaluate((elapsedMs) => window.__toioTest.seekAnimation(elapsedMs), totalDuration - 1);
+  const beforeFinish = await page.evaluate(() => window.__toioTest.getDeadPreview());
+  const beforePose = beforeFinish.cubePath.at(-1);
+  await page.click("#simPauseBtn");
+  await page.clock.runFor(100);
+  const afterFinish = await page.evaluate(() => window.__toioTest.getDeadPreview());
+  const afterPose = afterFinish.cubePath.at(-1);
+
+  expect(beforePose).toBeDefined();
+  expect(afterPose).toBeDefined();
+  expect(Math.hypot(afterPose.x - beforePose.x, afterPose.y - beforePose.y)).toBeLessThan(0.1);
+  expect(Math.abs(afterPose.theta - beforePose.theta)).toBeLessThan(0.1);
+});
+
+test("arc wheel speeds entered before duration remain unchanged", async ({ page }) => {
+  await page.goto("/");
+  await page.selectOption("#sampleSelect", "samples/json/keroppi-outline.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const arcRow = page.locator('.command-row:has(input[data-command-key="rightSpeed"])').first();
+  await arcRow.locator('input[data-command-key="leftSpeed"]').fill("8");
+  await expect(arcRow.locator('input[data-command-key="leftSpeed"]')).toHaveValue("8");
+  await arcRow.locator('input[data-command-key="rightSpeed"]').fill("20");
+  await expect(arcRow.locator('input[data-command-key="rightSpeed"]')).toHaveValue("20");
+  await arcRow.locator('input[data-command-key="durationMs"]').fill("1500");
+  await arcRow.locator('input[data-command-key="durationMs"]').blur();
+
+  await expect(arcRow.locator('input[data-command-key="leftSpeed"]')).toHaveValue("8");
+  await expect(arcRow.locator('input[data-command-key="rightSpeed"]')).toHaveValue("20");
+  await expect(arcRow.locator('input[data-command-key="durationMs"]')).toHaveValue("1500");
+});
+
 test("edited parallel-line animation uses the edited turn and remains physically continuous", async ({ page }) => {
   await page.goto("/");
   await page.selectOption("#sampleSelect", "samples/json/line-2.json");
@@ -107,6 +338,76 @@ test("edited triangle draw animation remains physically continuous", async ({ pa
     expect(distance, `triangle position jump ${distance}: ${JSON.stringify(previous)} -> ${JSON.stringify(current)}`).toBeLessThan(10);
     const angleDelta = Math.abs(((((current.theta - previous.theta) + 180) % 360) + 360) % 360 - 180);
     expect(angleDelta, `triangle rotation jump ${angleDelta}: ${JSON.stringify(previous)} -> ${JSON.stringify(current)}`).toBeLessThan(15);
+  }
+});
+
+test("edited wave arc animation remains physically continuous", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("#importInput").setInputFiles("data/wave-copy-paper.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const before = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  const firstArc = before.commands.find((command) => command.segmentId === "seg-0" && command.geometry === "arc");
+  expect(firstArc).toBeDefined();
+  const firstArcIndex = before.commands.indexOf(firstArc);
+  const duration = page.locator(`input[data-command-index="${firstArcIndex}"][data-command-key="durationMs"]`);
+  await duration.fill(String(firstArc.durationMs + 100));
+  await duration.blur();
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const timeline = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  const editedArc = timeline.commands[firstArcIndex];
+  expect(editedArc.durationMs).toBe(firstArc.durationMs + 100);
+  const editedItem = timeline.items.find((item) => item.commandIndex === firstArcIndex);
+  expect(editedItem).toBeDefined();
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), timeline.durationMs);
+  const finalSnapshot = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  const finalPreview = await page.evaluate(() => window.__toioTest.getDeadPreview());
+  const editedPath = finalPreview.segmentPenPaths.find(([segmentId]) => segmentId === "seg-0")?.[1];
+  expect(editedPath).toBeDefined();
+  const finalEditedArc = finalSnapshot.commands[firstArcIndex];
+  expect(Math.hypot(editedPath.at(-1).x - finalEditedArc.penX, editedPath.at(-1).y - finalEditedArc.penY)).toBeLessThan(0.1);
+  const midTime = editedItem.startMs + (editedItem.endMs - editedItem.startMs) / 2;
+  if (Number.isFinite(midTime)) {
+    await page.evaluate((time) => window.__toioTest.seekAnimation(time), midTime);
+    const midSnapshot = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+    const midPreview = await page.evaluate(() => window.__toioTest.getDeadPreview());
+    const midPath = midPreview.segmentPenPaths.find(([segmentId]) => segmentId === "seg-0")?.[1];
+    const midArc = midSnapshot.commands[firstArcIndex];
+    expect(midPath).toBeDefined();
+    expect(Math.hypot(midPath.at(-1).x - midArc.penX, midPath.at(-1).y - midArc.penY)).toBeLessThan(0.1);
+  }
+  await page.evaluate((time) => window.__toioTest.seekAnimation(0), 0);
+  const followingItem = timeline.items.find((item) => item.startMs >= editedItem.endMs && item.commandIndex !== firstArcIndex);
+  expect(followingItem).toBeDefined();
+
+  const at = async (elapsedMs) => {
+    await page.evaluate((time) => window.__toioTest.seekAnimation(time), elapsedMs);
+    return page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  };
+  const arcEnd = await at(editedItem.endMs - 1);
+  const followingStart = await at(followingItem.startMs);
+  const arcPose = arcEnd.commands[firstArcIndex];
+  const followingPose = followingStart.commands[followingItem.commandIndex];
+  expect(Math.hypot(followingPose.x - arcPose.x, followingPose.y - arcPose.y)).toBeLessThan(10);
+
+  const frames = [];
+  for (let elapsedMs = 0; elapsedMs <= timeline.durationMs; elapsedMs += 25) {
+    const snapshot = await at(elapsedMs);
+    const item = snapshot.items.find((candidate) => elapsedMs >= candidate.startMs && elapsedMs < candidate.endMs);
+    const command = item && snapshot.commands[item.commandIndex];
+    if (command?.x == null || command?.y == null || command?.theta == null) continue;
+    frames.push({ elapsedMs, commandIndex: item.commandIndex, x: command.x, y: command.y, theta: command.theta });
+  }
+  expect(frames.length).toBeGreaterThan(10);
+  for (let index = 1; index < frames.length; index += 1) {
+    const previous = frames[index - 1];
+    const current = frames[index];
+    expect(Math.hypot(current.x - previous.x, current.y - previous.y), `wave position jump: ${JSON.stringify(previous)} -> ${JSON.stringify(current)}`).toBeLessThan(10);
+    const angleDelta = Math.abs(((((current.theta - previous.theta) + 180) % 360) + 360) % 360 - 180);
+    expect(angleDelta, `wave rotation jump: ${JSON.stringify(previous)} -> ${JSON.stringify(current)}`).toBeLessThan(15);
   }
 });
 

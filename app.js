@@ -209,8 +209,17 @@ const simulationPlayback = window.ToioPlotterSimulationPlayer.createSimulationPl
 });
 
 window.__toioTest = {
+  getCommands: () => simulation?.commands || [],
   getAnimationSnapshot: () => simulationPlayback.getAnimationSnapshot(),
   seekAnimation: (elapsedMs) => simulationPlayback.seekAnimation(elapsedMs),
+  getDeadPreview: () => {
+    const preview = canvasRenderer.__test.buildDeadCommandPreview(getAnimatedCommands());
+    return {
+      penDownSegments: preview.penDownSegments,
+      segmentPenPaths: [...preview.segmentPenPaths.entries()],
+      cubePath: preview.cubePath,
+    };
+  },
 };
 
 const commandEditor = window.ToioPlotterCommandEditor.createCommandEditor({
@@ -1394,9 +1403,6 @@ function bindEvents() {
   els.copyCommandReportBtn?.addEventListener("click", () => copyCommandReport().catch((error) => log(`Copy failed: ${error.message}`)));
   els.toioCommandOutput?.addEventListener("input", (event) => {
     if (event.target instanceof HTMLInputElement) commandEditor.updateCommandEdit(event.target, { render: false });
-  });
-  els.toioCommandOutput?.addEventListener("change", (event) => {
-    if (event.target instanceof HTMLInputElement) commandEditor.updateCommandEdit(event.target, { render: true });
   });
   els.toioCommandOutput?.addEventListener("click", (event) => {
     const runButton = event.target.closest?.("[data-run-command-index]");

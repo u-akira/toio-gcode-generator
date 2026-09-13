@@ -14,6 +14,7 @@ function loadCommandEditor({
   penToCube = (point) => point,
   cubeToPen = (point) => point,
   turnWheelSpeeds = () => ({ left: 0, right: 0 }),
+  computeArcWheelSpeedsForDuration,
 }) {
   const context = { window: {}, Math };
   vm.createContext(context);
@@ -36,6 +37,7 @@ function loadCommandEditor({
     clamp: (value, min, max) => Math.min(max, Math.max(min, value)),
     minTurnDurationMs: 150,
     turnWheelSpeeds,
+    computeArcWheelSpeedsForDuration,
     turnMsPer90: () => 660,
     penToCube,
     cubeToPen,
@@ -47,6 +49,33 @@ function loadCommandEditor({
     draw: () => {},
   });
 }
+
+test("editing arc duration does not overwrite a directly entered wheel speed", () => {
+  let autoCalculationCalls = 0;
+  const commands = [{
+    type: "motor", kind: "draw", geometry: "arc", segmentId: "seg-0",
+    leftSpeed: 8, rightSpeed: 12, durationMs: 900,
+    fromX: 0, fromY: 0, x: 10, y: 10, theta: 20, startTheta: 0,
+    center: { x: 0, y: 10 }, radius: 10, sweepAngle: 90,
+  }];
+  const editor = loadCommandEditor({
+    commands,
+    overrides: new Map(),
+    getConfig: () => ({ drawSpeed: 20, travelSpeed: 20, deadArcMmPerSecAtDrawSpeed: 30, deadMmPerSecAtTravelSpeed: 70, deadWheelBaseMm: 26 }),
+    computeArcWheelSpeedsForDuration: () => {
+      autoCalculationCalls += 1;
+      return { left: 7, right: 12 };
+    },
+  });
+  const input = (key, value) => ({ value: String(value), dataset: { commandIndex: "0", commandKey: key } });
+
+  editor.updateCommandEdit(input("rightSpeed", 20), { render: false });
+  editor.updateCommandEdit(input("durationMs", 1500), { render: false });
+
+  assert.equal(commands[0].rightSpeed, 20);
+  assert.equal(commands[0].durationMs, 1500);
+  assert.equal(autoCalculationCalls, 0);
+});
 
 test("wait command overrides are captured and applied for JSON round trips", () => {
   const commands = [

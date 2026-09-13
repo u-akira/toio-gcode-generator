@@ -316,6 +316,9 @@
       if (command.type === "motor" && command.geometry !== "arc" && (key === "speed" || key === "durationMs" || key === "distanceScale")) {
         ensureMotorBaseline(command);
       }
+      if (command.type === "turn" && (key === "leftSpeed" || key === "rightSpeed")) {
+        command.manualWheelSpeeds = true;
+      }
       if (command.type === "turn" && (key === "leftSpeed" || key === "rightSpeed" || key === "durationMs") && !command.manualWheelSpeeds) {
         const speeds = turnWheelSpeeds(command);
         command.leftSpeed = speeds.left;
@@ -333,22 +336,6 @@
       command[key] = value;
       if (command.type === "motor" && command.geometry === "arc") {
         if (key === "leftSpeed" || key === "rightSpeed") command[key] = clamp(value, -255, 255);
-        if (key === "durationMs" && !command.turnInPlace && computeArcWheelSpeedsForDuration) {
-          const config = getConfig();
-          const wheelBaseMm = Math.max(1, Number(config.deadWheelBaseMm) || 26);
-          const baseSpeed = command.kind === "draw" ? config.drawSpeed : config.travelSpeed;
-          const baseMmPerSec = command.kind === "draw" ? config.deadArcMmPerSecAtDrawSpeed : config.deadMmPerSecAtTravelSpeed;
-          const speeds = computeArcWheelSpeedsForDuration(
-            command.radius,
-            command.sweepAngle,
-            command.durationMs,
-            wheelBaseMm,
-            baseSpeed,
-            baseMmPerSec,
-          );
-          command.leftSpeed = speeds.left;
-          command.rightSpeed = speeds.right;
-        }
         if (key === "leftSpeed" || key === "rightSpeed" || key === "durationMs") command.manualWheelSpeeds = true;
         command.motionModel = "differential-drive";
       } else if (command.type === "motor" && (key === "speed" || key === "durationMs" || key === "distanceScale")) {
@@ -437,7 +424,7 @@
         }
         if (command.type === "turn") {
           if (!currentCube && command.x != null && command.y != null) currentCube = { x: command.x, y: command.y };
-          if (command.motionModel === "differential-drive" && currentCube) {
+          if ((command.motionModel === "differential-drive" || (command.leftSpeed != null && command.rightSpeed != null)) && currentCube) {
             const start = { ...currentCube };
             const startTheta = currentTheta ?? command.startTheta ?? (command.theta - (command.angle || 0));
             const result = deadMotion.integrateDifferentialDrive(

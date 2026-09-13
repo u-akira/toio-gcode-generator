@@ -48,8 +48,24 @@
           cursorMs += durationMs;
         }
         if (command.theta != null) lastTheta = command.theta;
-        if (command.x != null && command.y != null && command.theta != null) {
-          lastCubePose = { x: command.x, y: command.y, theta: command.theta };
+        if ((command.type === "motor" || command.type === "turn") && command.leftSpeed != null && command.rightSpeed != null) {
+          const startPose = lastCubePose || (command.fromX != null && command.fromY != null
+            ? { x: command.fromX, y: command.fromY, theta: command.startTheta ?? command.theta ?? lastTheta ?? initialTheta }
+            : null);
+          if (startPose) {
+            const pose = deadMotion.integrateDifferentialDrive(
+              { x: startPose.x, y: startPose.y },
+              startPose.theta ?? lastTheta ?? initialTheta,
+              command.leftSpeed,
+              command.rightSpeed,
+              command.durationMs || 0,
+              command,
+              config,
+            );
+            lastCubePose = { x: pose.x, y: pose.y, theta: normalizeDegrees(pose.theta) };
+          }
+        } else if ((command.type === "move" || command.type === "rotate" || command.type === "motor" || command.type === "turn") && command.x != null && command.y != null) {
+          lastCubePose = { x: command.x, y: command.y, theta: command.theta ?? lastTheta ?? initialTheta };
         }
         if ((command.type === "move" || command.type === "rotate" || command.type === "motor") && command.penX != null) {
           lastPenPoint = { x: command.penX, y: command.penY };
@@ -149,7 +165,7 @@
           penPreviewPoints: previewEnd(command.penPreviewPoints, penPoint),
         };
       }
-      if ((command.type === "turn" || command.type === "motor") && command.motionModel === "differential-drive" && (command.fromX != null || (command.type === "turn" && command.x != null))) {
+      if ((command.type === "turn" || command.type === "motor") && (command.motionModel === "differential-drive" || (command.type === "turn" && command.leftSpeed != null && command.rightSpeed != null)) && (command.fromX != null || (command.type === "turn" && command.x != null))) {
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
         const theta = command.type === "turn"
