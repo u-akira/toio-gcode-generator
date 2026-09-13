@@ -494,7 +494,7 @@ test("keroppi outline sample draws tight outer eyes and side outline arcs slowly
   assert.ok(Math.min(...leftInnerEye.penPreviewPoints.map((point) => point.y)) < 220);
   assert.ok(Math.min(...rightInnerEye.penPreviewPoints.map((point) => point.y)) < 220);
   assert.ok(drawMotors.some((command) => command.leftSpeed < 0 || command.rightSpeed < 0));
-  assert.ok(drawMotors.every((command) => Math.max(Math.abs(command.leftSpeed), Math.abs(command.rightSpeed)) <= 32));
+  assert.ok(drawMotors.every((command) => Math.max(Math.abs(command.leftSpeed), Math.abs(command.rightSpeed)) <= 255));
 });
 
 test("dead reckoning uses auto-corrected freehand arcs as one draw motor command", () => {

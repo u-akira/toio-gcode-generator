@@ -109,3 +109,27 @@ test("edited triangle draw animation remains physically continuous", async ({ pa
     expect(angleDelta, `triangle rotation jump ${angleDelta}: ${JSON.stringify(previous)} -> ${JSON.stringify(current)}`).toBeLessThan(15);
   }
 });
+
+test("circle keeps one full arc when its duration changes by 10ms", async ({ page }) => {
+  await page.goto("/");
+  await page.selectOption("#sampleSelect", "samples/json/circle.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const duration = page.locator('#toioCommandOutput input[data-command-key="durationMs"]').first();
+  await expect(duration).toHaveValue("7370");
+  await duration.fill("7360");
+  await duration.blur();
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const timeline = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  const arcItem = timeline.items.find((item) => item.commandIndex === 2);
+  expect(arcItem.durationMs).toBe(7360);
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), arcItem.endMs - 1);
+  const snapshot = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  const arc = snapshot.commands[2];
+  expect(Math.hypot(arc.x - 320, arc.y - 250)).toBeLessThan(1);
+  const headingError = Math.abs((((arc.theta - 90) + 180) % 360 + 360) % 360 - 180);
+  expect(headingError).toBeLessThan(2);
+});
