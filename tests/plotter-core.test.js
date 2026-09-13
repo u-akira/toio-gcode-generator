@@ -630,6 +630,64 @@ test("dead reckoning recalculates pen-up travel directly to the next draw start"
   assert.ok(drawTurn);
 });
 
+test("dead reckoning can skip a small turn-to-travel and models the straight travel endpoint", () => {
+  const strokes = [
+    makeStroke([
+      [190, 250],
+      [250, 250],
+    ]),
+    makeStroke([
+      [300, 268],
+      [360, 268],
+    ]),
+  ];
+  const result = new core.DeadReckoningPlanner(
+    core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: 0, penOffsetY: 0 }),
+    {},
+    { optimizeStrokeOrder: true, skipTurnToTravelAngleDeg: 30 },
+  ).plan(strokes);
+  const travel = result.commands.find((command) => command.type === "motor" && command.kind === "travel");
+  const travelTurns = result.commands.filter((command) => command.type === "turn" && command.role === "turn-to-travel");
+
+  assert.equal(travelTurns.length, 0);
+  assert.ok(travel);
+  assert.equal(travel.theta, 0);
+  assert.equal(travel.y, 250);
+  assert.notEqual(travel.x, 300);
+});
+
+test("dead reckoning stroke-order optimization is opt-in and can reorder strokes", () => {
+  const strokes = [
+    makeStroke([
+      [190, 250],
+      [250, 250],
+    ]),
+    makeStroke([
+      [100, 100],
+      [110, 100],
+    ]),
+    makeStroke([
+      [20, 0],
+      [30, 0],
+    ]),
+  ];
+  const base = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0 }), {}, {}).plan(strokes);
+  const optimized = new core.DeadReckoningPlanner(
+    core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+    {},
+    { optimizeStrokeOrder: true, skipTurnToTravelAngleDeg: 30 },
+  ).plan(strokes);
+
+  assert.deepEqual(
+    base.segments.filter((segment) => segment.kind === "draw").map((segment) => segment.start.y),
+    [250, 100, 0],
+  );
+  assert.deepEqual(
+    optimized.segments.filter((segment) => segment.kind === "draw").map((segment) => segment.start.y),
+    [0, 100, 250],
+  );
+});
+
 test("dead reckoning changes draw direction with motor-only transition steps", () => {
   const result = new core.DeadReckoningPlanner(core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: -48, penOffsetY: 0 })).plan([
     makeStroke([

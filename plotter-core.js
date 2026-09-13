@@ -274,18 +274,112 @@
     return new PositionIdPlanner(configInput).plan(strokes);
   }
 
+  function normalizePlanningOptions(options = {}) {
+    return {
+      optimizeStrokeOrder: options.optimizeStrokeOrder === true,
+      skipTurnToTravelAngleDeg: clamp(Number(options.skipTurnToTravelAngleDeg) || 30, 0, 180),
+    };
+  }
+
+  function optimizeStrokeOrder(strokes, planningOptions, config) {
+    if (!planningOptions.optimizeStrokeOrder || strokes.length < 2) return strokes;
+    const anchors = strokes.map((stroke) => strokeAnchor(stroke, config));
+    if (anchors.some((anchor) => !anchor)) return strokes;
+
+    let best = null;
+    const used = Array(strokes.length).fill(false);
+    const order = [];
+    const visit = () => {
+      if (order.length === strokes.length) {
+        let skippedTurns = 0;
+        let travelDistance = 0;
+        for (let i = 1; i < order.length; i += 1) {
+          const previous = anchors[order[i - 1]];
+          const next = anchors[order[i]];
+          const travelHeading = headingBetween(previous.endCube, next.startCube);
+          const angle = Math.abs(signedAngleDelta(previous.endHeading, travelHeading));
+          if (angle <= planningOptions.skipTurnToTravelAngleDeg) skippedTurns += 1;
+          travelDistance += distance(previous.endCube, next.startCube);
+        }
+        const candidate = { order: [...order], skippedTurns, travelDistance };
+        if (
+          !best ||
+          candidate.skippedTurns > best.skippedTurns ||
+          (candidate.skippedTurns === best.skippedTurns && candidate.travelDistance < best.travelDistance)
+        ) {
+          best = candidate;
+        }
+        return;
+      }
+      for (let i = 0; i < strokes.length; i += 1) {
+        if (used[i]) continue;
+        used[i] = true;
+        order.push(i);
+        visit();
+        order.pop();
+        used[i] = false;
+      }
+    };
+    visit();
+    return best ? best.order.map((index) => strokes[index]) : strokes;
+  }
+
+  function strokeAnchor(stroke, config) {
+    if (stroke.primitives?.length) {
+      const first = stroke.primitives[0];
+      const last = stroke.primitives[stroke.primitives.length - 1];
+      const raw = stroke.raw || [];
+      const firstArc = first.kind === "arc" ? normalizeArcPrimitive(first) : null;
+      const lastArc = last.kind === "arc" ? normalizeArcPrimitive(last) : null;
+      const start = firstArc
+        ? cubeToPen(pointOnCircle(firstArc.center, firstArc.radius, firstArc.startAngle), firstArc.startHeading, config)
+        : raw[0] || (first.kind === "line" ? first.start : null);
+      const end = lastArc
+        ? cubeToPen(pointOnCircle(lastArc.center, lastArc.radius, lastArc.startAngle + lastArc.sweepAngle), lastArc.endHeading, config)
+        : raw[raw.length - 1] || (last.kind === "line" ? last.end : null);
+      const startHeading = firstArc ? firstArc.startHeading : headingBetween(first.start, first.end);
+      const endHeading = lastArc ? lastArc.endHeading : headingBetween(last.start, last.end);
+      if (start && end && Number.isFinite(startHeading) && Number.isFinite(endHeading)) {
+        return {
+          startPoint: start,
+          endPoint: end,
+          startHeading,
+          endHeading,
+          startCube: penToCube(start, startHeading, config),
+          endCube: penToCube(end, endHeading, config),
+        };
+      }
+    }
+    const points = stroke.processed || stroke.raw;
+    if (!points || points.length < 2) return null;
+    return {
+      startPoint: points[0],
+      endPoint: points[points.length - 1],
+      startHeading: headingBetween(points[0], points[1]),
+      endHeading: headingBetween(points[points.length - 2], points[points.length - 1]),
+      startCube: penToCube(points[0], headingBetween(points[0], points[1]), config),
+      endCube: penToCube(points[points.length - 1], headingBetween(points[points.length - 2], points[points.length - 1]), config),
+    };
+  }
+
   class DeadReckoningPlanner extends BasePlotterPlanner {
-    constructor(configInput = {}, segmentSettings = {}) {
+    constructor(configInput = {}, segmentSettings = {}, planningOptions = {}) {
       super(configInput);
       this.segmentSettings = segmentSettings;
+      this.planningOptions = normalizePlanningOptions(planningOptions);
       this.currentPen = null;
       this.currentHeading = null;
       this.currentCube = null;
       this.segmentIndex = 0;
+      this.skipNextDrawTravel = false;
     }
 
     plan(strokes) {
-      const processedStrokes = this.cloneProcessedStrokes(this.processStrokes(strokes));
+      const processedStrokes = optimizeStrokeOrder(
+        this.cloneProcessedStrokes(this.processStrokes(strokes)),
+        this.planningOptions,
+        this.config,
+      );
       const plan = {
         mode: "dead",
         commands: [{ type: "pen", state: "up" }],
@@ -653,7 +747,8 @@
       };
       const heading = segment.commandHeading ?? segment.heading;
       const angle = signedAngleDelta(pose.theta, heading);
-      if (Math.abs(angle) >= 0.1) {
+      const skipTurnToTravel = this.shouldSkipTurnToTravel(pose.theta, heading);
+      if (Math.abs(angle) >= 0.1 && !skipTurnToTravel) {
         this.addTurnStep(plan, {
           segment,
           pose,
@@ -661,7 +756,11 @@
           label: "turn-to-travel",
         });
       }
-      const penEnd = cubeToPen(segment.commandEndCube, heading, this.config);
+      const travelEndCube = skipTurnToTravel
+        ? movePoint(pose, pose.theta, distance(pose, segment.commandEndCube))
+        : segment.commandEndCube;
+      if (skipTurnToTravel) this.skipNextDrawTravel = true;
+      const penEnd = cubeToPen(travelEndCube, skipTurnToTravel ? pose.theta : heading, this.config);
       this.warnIfOptimizedTravelExitsPreview(plan, segment);
       plan.commands.push({
         type: "motor",
@@ -674,10 +773,10 @@
         durationMs: segment.commandDurationMs ?? segment.durationMs,
         fromX: segment.commandStartCube.x,
         fromY: segment.commandStartCube.y,
-        x: segment.commandEndCube.x,
-        y: segment.commandEndCube.y,
-        theta: heading,
-        startTheta: heading,
+        x: travelEndCube.x,
+        y: travelEndCube.y,
+        theta: skipTurnToTravel ? pose.theta : heading,
+        startTheta: skipTurnToTravel ? pose.theta : heading,
         penX: penEnd.x,
         penY: penEnd.y,
         idealFromX: segment.start.x,
@@ -687,7 +786,11 @@
       });
       plan.stats.travelSegments += 1;
       if (this.currentCube) plan.cubePath.push({ ...this.currentCube, theta: this.currentHeading });
-      plan.cubePath.push({ ...segment.commandStartCube, theta: heading }, { ...segment.commandEndCube, theta: heading });
+      plan.cubePath.push({ ...segment.commandStartCube, theta: pose.theta }, { ...travelEndCube, theta: skipTurnToTravel ? pose.theta : heading });
+      if (skipTurnToTravel) {
+        segment.commandEndCube = travelEndCube;
+        segment.commandEndHeading = pose.theta;
+      }
     }
 
     warnIfOptimizedTravelExitsPreview(plan, segment) {
@@ -709,25 +812,35 @@
       const targetPose = { ...segment.startCube, theta: segment.heading };
       const travelDistance = distance(pose, targetPose);
 
-      if (travelDistance >= 0.1) {
+      const skipCorrection = this.skipNextDrawTravel;
+      this.skipNextDrawTravel = false;
+      if (travelDistance >= 0.1 && !skipCorrection) {
         const travelHeading = headingBetween(pose, targetPose);
-        pose = this.addTurnStep(plan, {
-          segment,
-          pose,
-          theta: travelHeading,
-          label: "turn-to-travel",
-        });
-        pose = this.addTravelStep(plan, { segment, pose, targetPose, travelHeading });
+        const skipTurnToTravel = this.shouldSkipTurnToTravel(pose.theta, travelHeading);
+        if (!skipTurnToTravel) {
+          pose = this.addTurnStep(plan, {
+            segment,
+            pose,
+            theta: travelHeading,
+            label: "turn-to-travel",
+          });
+        }
+        pose = this.addTravelStep(plan, { segment, pose, targetPose, travelHeading, skipTurnToTravel });
         this.currentCube = { x: pose.x, y: pose.y };
         this.currentHeading = pose.theta;
       }
 
       this.addTurnStep(plan, {
         segment,
-        pose: { ...targetPose, theta: this.currentHeading ?? pose.theta },
+        pose: skipCorrection ? { ...this.currentCube, theta: this.currentHeading ?? pose.theta } : { ...targetPose, theta: this.currentHeading ?? pose.theta },
         theta: segment.heading,
         label: "turn-to-draw",
       });
+    }
+
+    shouldSkipTurnToTravel(currentHeading, travelHeading) {
+      if (!this.planningOptions.optimizeStrokeOrder) return false;
+      return Math.abs(signedAngleDelta(currentHeading, travelHeading)) <= this.planningOptions.skipTurnToTravelAngleDeg;
     }
 
     addTurnStep(plan, { segment, pose, theta, label }) {
@@ -752,8 +865,9 @@
       return { x: pose.x, y: pose.y, theta };
     }
 
-    addTravelStep(plan, { segment, pose, targetPose, travelHeading }) {
+    addTravelStep(plan, { segment, pose, targetPose, travelHeading, skipTurnToTravel = false }) {
       const travelDistance = distance(pose, targetPose);
+      const actualTargetPose = skipTurnToTravel ? { ...movePoint(pose, pose.theta, travelDistance), theta: pose.theta } : targetPose;
       const durationMs = computeStraightDurationMs(
         travelDistance,
         this.config.travelSpeed,
@@ -761,7 +875,7 @@
         this.config.deadMmPerSecAtTravelSpeed,
         clamp(Number(this.config.deadTravelDistanceScale), 0.1, 2),
       );
-      const penEnd = cubeToPen(targetPose, travelHeading, this.config);
+      const penEnd = cubeToPen(actualTargetPose, actualTargetPose.theta, this.config);
       plan.commands.push({
         type: "motor",
         role: "transition-travel",
@@ -772,19 +886,19 @@
         durationMs,
         fromX: pose.x,
         fromY: pose.y,
-        x: targetPose.x,
-        y: targetPose.y,
-        theta: travelHeading,
+        x: actualTargetPose.x,
+        y: actualTargetPose.y,
+        theta: actualTargetPose.theta,
         penX: penEnd.x,
         penY: penEnd.y,
       });
       plan.stats.travelSegments += 1;
-      return { x: targetPose.x, y: targetPose.y, theta: travelHeading };
+      return { x: actualTargetPose.x, y: actualTargetPose.y, theta: actualTargetPose.theta };
     }
   }
 
-  function createDeadReckoningSimulation({ strokes, config: configInput, segmentSettings = {} }) {
-    return new DeadReckoningPlanner(configInput, segmentSettings).plan(strokes);
+  function createDeadReckoningSimulation({ strokes, config: configInput, segmentSettings = {}, planningOptions = {} }) {
+    return new DeadReckoningPlanner(configInput, segmentSettings, planningOptions).plan(strokes);
   }
 
   function computeStraightDurationMs(lengthMm, speed, baseSpeed, baseMmPerSec, durationScale) {
@@ -908,6 +1022,14 @@
     return {
       x: center.x + Math.cos(angle) * radius,
       y: center.y + Math.sin(angle) * radius,
+    };
+  }
+
+  function movePoint(point, heading, distanceMm) {
+    const angle = degToRad(heading);
+    return {
+      x: point.x + Math.cos(angle) * distanceMm,
+      y: point.y + Math.sin(angle) * distanceMm,
     };
   }
 

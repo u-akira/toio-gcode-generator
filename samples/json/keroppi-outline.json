@@ -2,6 +2,10 @@
   "version": 1,
   "name": "keroppi-outline",
   "mat": { "minX": 98, "minY": 142, "maxX": 402, "maxY": 358 },
+  "planningOptions": {
+    "optimizeStrokeOrder": true,
+    "skipTurnToTravelAngleDeg": 30
+  },
   "deadSegmentSettings": {
     "seg-0": { "speed": 12, "durationScale": 1.25 },
     "seg-1": { "speed": 12, "durationScale": 1.25 },
