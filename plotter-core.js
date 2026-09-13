@@ -560,17 +560,9 @@
       const start = cubeToPen(startCube, arc.startHeading, config);
       const end = cubeToPen(endCube, arc.endHeading, config);
       const arcLengthMm = arc.radius * Math.abs(degToRad(arc.sweepAngle));
-      const initialWheelSpeeds = computeArcWheelSpeeds(speed, arc.radius, arc.sweepAngle, wheelBaseMm, steeringTrim);
-      const averageSpeed = (Math.abs(initialWheelSpeeds.left) + Math.abs(initialWheelSpeeds.right)) / 2;
+      const wheelSpeeds = computeArcWheelSpeeds(speed, arc.radius, arc.sweepAngle, wheelBaseMm, steeringTrim);
+      const averageSpeed = (Math.abs(wheelSpeeds.left) + Math.abs(wheelSpeeds.right)) / 2;
       const durationMs = computeUnclampedMotionDurationMs(arcLengthMm, averageSpeed, baseSpeed, baseMmPerSec, durationScale);
-      const wheelSpeeds = computeArcWheelSpeedsForDuration(
-        arc.radius,
-        arc.sweepAngle,
-        durationMs,
-        wheelBaseMm,
-        baseSpeed,
-        baseMmPerSec,
-      );
       const preview = arcPreviewPoints({ ...arc, startCube, endCube }, config);
       return {
         id,
@@ -822,22 +814,6 @@
     return {
       left: Math.round(clamp(left, -255, 255)),
       right: Math.round(clamp(right, -255, 255)),
-    };
-  }
-
-  function computeArcWheelSpeedsForDuration(radius, sweepAngle, durationMs, wheelBaseMm, baseSpeed, baseMmPerSec) {
-    const durationSec = Math.max(0.001, durationMs / 1000);
-    const angularMmPerSec = degToRad(sweepAngle) / durationSec;
-    const linearMmPerSec = angularMmPerSec * Math.max(1, Math.abs(radius));
-    const halfBase = Math.max(1, wheelBaseMm) / 2;
-    const wheelScale = Math.max(1, baseMmPerSec) / Math.max(1, baseSpeed);
-    const left = (linearMmPerSec + angularMmPerSec * halfBase) / wheelScale;
-    const right = (linearMmPerSec - angularMmPerSec * halfBase) / wheelScale;
-    const maxAbs = Math.max(Math.abs(left), Math.abs(right), 1);
-    const clampScale = maxAbs > 255 ? 255 / maxAbs : 1;
-    return {
-      left: clamp(left * clampScale, -255, 255),
-      right: clamp(right * clampScale, -255, 255),
     };
   }
 
