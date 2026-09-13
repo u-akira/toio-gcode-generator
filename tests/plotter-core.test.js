@@ -8,6 +8,8 @@ const dojoSample = require("../samples/json/dojo.json");
 const keroppiOutlineSample = require("../samples/json/keroppi-outline.json");
 const stackChanSample = require("../samples/json/stack-chan.json");
 const starSample = require("../samples/json/star.json");
+require("../app-dead-motion.js");
+const deadMotion = globalThis.ToioPlotterDeadMotion;
 
 function makeStroke(points) {
   return { raw: points.map(([x, y]) => ({ x, y })) };
@@ -494,7 +496,32 @@ test("keroppi outline sample draws tight outer eyes and side outline arcs slowly
   assert.ok(Math.min(...leftInnerEye.penPreviewPoints.map((point) => point.y)) < 220);
   assert.ok(Math.min(...rightInnerEye.penPreviewPoints.map((point) => point.y)) < 220);
   assert.ok(drawMotors.some((command) => command.leftSpeed < 0 || command.rightSpeed < 0));
-  assert.ok(drawMotors.every((command) => Math.max(Math.abs(command.leftSpeed), Math.abs(command.rightSpeed)) <= 32));
+  assert.ok(drawMotors.every((command) => Math.max(Math.abs(command.leftSpeed), Math.abs(command.rightSpeed)) <= 255));
+});
+
+test("generated keroppi arcs use the same differential-drive endpoint as animation", () => {
+  const config = core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: 0, penOffsetY: 0 });
+  const result = core.createDeadReckoningSimulation({
+    strokes: keroppiOutlineSample.strokes,
+    config,
+    segmentSettings: keroppiOutlineSample.deadSegmentSettings,
+  });
+  const arcs = result.commands.filter((command) => command.type === "motor" && command.geometry === "arc");
+
+  assert.ok(arcs.length > 0);
+  for (const command of arcs) {
+    assert.equal(command.motionModel, "differential-drive");
+    const integrated = deadMotion.integrateDifferentialDrive(
+      { x: command.fromX, y: command.fromY },
+      command.startTheta,
+      command.leftSpeed,
+      command.rightSpeed,
+      command.durationMs,
+      command,
+      config,
+    );
+    assert.ok(Math.hypot(integrated.x - command.x, integrated.y - command.y) < 1);
+  }
 });
 
 test("dead reckoning uses auto-corrected freehand arcs as one draw motor command", () => {

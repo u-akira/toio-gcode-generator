@@ -109,3 +109,29 @@ test("edited triangle draw animation remains physically continuous", async ({ pa
     expect(angleDelta, `triangle rotation jump ${angleDelta}: ${JSON.stringify(previous)} -> ${JSON.stringify(current)}`).toBeLessThan(15);
   }
 });
+
+test("edited keroppi arc stays near its loaded endpoint", async ({ page }) => {
+  await page.goto("/");
+  await page.selectOption("#sampleSelect", "samples/json/keroppi-outline.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const loadedTimeline = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), loadedTimeline.durationMs - 1);
+  const loaded = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  const loadedArc = loaded.commands.find((command) => command.segmentId === "seg-0");
+  expect(loadedArc).toBeDefined();
+
+  const duration = page.locator(`input[data-command-index="${loaded.commands.indexOf(loadedArc)}"][data-command-key="durationMs"]`);
+  await duration.fill(String(loadedArc.durationMs + 100));
+  await duration.blur();
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const editedTimeline = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), editedTimeline.durationMs - 1);
+  const edited = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
+  const editedArc = edited.commands.find((command) => command.segmentId === "seg-0");
+  expect(editedArc).toBeDefined();
+  expect(Math.hypot(editedArc.x - loadedArc.x, editedArc.y - loadedArc.y)).toBeLessThan(5);
+});
