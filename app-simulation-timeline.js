@@ -212,12 +212,15 @@
           penY: penPoint ? penPoint.y : command.penY,
         };
       }
-      if (command.type === "motor" && command.geometry === "arc" && command.center && command.radius != null && command.startAngle != null && command.sweepAngle != null) {
+      if (command.type === "motor" && command.geometry === "arc" && (command.cubeCenter || command.center) && (command.cubeRadius ?? command.radius) != null && (command.cubeStartAngle ?? command.startAngle) != null && command.sweepAngle != null) {
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
-        const angle = command.startAngle + command.sweepAngle * t;
+        const center = command.cubeCenter || command.center;
+        const radius = command.cubeRadius ?? command.radius;
+        const startAngle = command.cubeStartAngle ?? command.startAngle;
+        const angle = startAngle + command.sweepAngle * t;
         const theta = normalizeDegrees((command.startTheta ?? command.theta ?? 0) + command.sweepAngle * t);
-        const cubePoint = pointOnCircle(command.center, command.radius, angle);
+        const cubePoint = pointOnCircle(center, radius, angle);
         const penPoint = cubeToPen(cubePoint, theta, config);
         const previewEnd = (points, currentPoint) => {
           if (!Array.isArray(points)) return points;

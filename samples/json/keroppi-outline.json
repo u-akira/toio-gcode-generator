@@ -3,13 +3,13 @@
   "name": "keroppi-outline",
   "mat": { "minX": 98, "minY": 142, "maxX": 402, "maxY": 358 },
   "deadSegmentSettings": {
-    "seg-0": { "speed": 12, "durationScale": 1.25 },
+    "seg-0": { "speed": 12, "durationScale": 1 },
     "seg-1": { "speed": 12, "durationScale": 1.25 },
-    "seg-2": { "speed": 12, "durationScale": 1.25 },
+    "seg-2": { "speed": 12, "durationScale": 1 },
     "seg-3": { "speed": 12, "durationScale": 1.25 },
-    "seg-4": { "speed": 12, "durationScale": 1.25 },
+    "seg-4": { "speed": 12, "durationScale": 1 },
     "seg-5": { "speed": 12, "durationScale": 1.25 },
-    "seg-6": { "speed": 12, "durationScale": 1.25 },
+    "seg-6": { "speed": 12, "durationScale": 1 },
     "seg-7": { "speed": 12, "durationScale": 1.25 },
     "seg-8": { "speed": 12, "durationScale": 1.25 },
     "seg-9": { "speed": 12, "durationScale": 1.25 },
@@ -23,100 +23,82 @@
         {
           "kind": "arc",
           "center": { "x": 238, "y": 273 },
-          "radius": 40,
-          "startAngle": 210,
+          "radius": 44.72136,
+          "startAngle": 224.882716,
+          "startHeading": 120,
           "sweepAngle": -110
         }
       ],
       "raw": [
-        { "x": 213.358984, "y": 235.679492 },
-        { "x": 135, "y": 300 },
-        { "x": 211.357918, "y": 308.919347 }
+        { "x": 206.312558, "y": 241.442021 },
+        { "x": 183.062068, "y": 289.796331 },
+        { "x": 231.054073, "y": 312.392310 }
       ]
     },
     {
       "primitives": [
         {
           "kind": "arc",
-          "center": { "x": 225, "y": 218 },
-          "radius": 12,
+          "center": { "x": 215, "y": 218 },
+          "radius": 25,
           "startAngle": 294.089506,
           "sweepAngle": 360
         }
       ],
       "raw": [
-        { "x": 225, "y": 188 },
-        { "x": 255, "y": 218 },
-        { "x": 225, "y": 248 },
-        { "x": 195, "y": 218 },
-        { "x": 225, "y": 188 }
+        { "x": 215, "y": 193 },
+        { "x": 240, "y": 218 },
+        { "x": 215, "y": 193 }
       ]
     },
     {
       "primitives": [
         {
           "kind": "arc",
-          "center": { "x": 275, "y": 218 },
-          "radius": 12,
+          "center": { "x": 285, "y": 218 },
+          "radius": 25,
           "startAngle": 294.089506,
           "sweepAngle": 360
         }
       ],
       "raw": [
-        { "x": 275, "y": 188 },
-        { "x": 305, "y": 218 },
-        { "x": 275, "y": 248 },
-        { "x": 245, "y": 218 },
-        { "x": 275, "y": 188 }
+        { "x": 285, "y": 193 },
+        { "x": 310, "y": 218 },
+        { "x": 285, "y": 193 }
       ]
     },
     {
       "primitives": [
         {
           "kind": "arc",
-          "center": { "x": 262, "y": 273 },
-          "radius": 40,
-          "startAngle": 330,
+          "center": { "x": 296.184073, "y": 273 },
+          "radius": 44.72136,
+          "startAngle": 315.117285,
+          "startHeading": 60,
           "sweepAngle": 110
         }
       ],
       "raw": [
-        { "x": 286.641016, "y": 235.679492 },
-        { "x": 365, "y": 300 },
-        { "x": 288.642082, "y": 308.919347 }
+        { "x": 327.871515, "y": 241.442021 },
+        { "x": 361.747796, "y": 289.796331 },
+        { "x": 302.805791, "y": 312.392310 }
       ]
     },
     {
       "primitives": [
         {
           "kind": "arc",
-          "center": { "x": 250, "y": 245 },
-          "radius": 32,
-          "startAngle": 116,
-          "sweepAngle": -116
+          "center": { "x": 257.301259, "y": 250 },
+          "radius": 37.735925,
+          "startAngle": 148,
+          "sweepAngle": -116,
+          "startHeading": 45.3
         }
       ],
       "raw": [
-        { "x": 217.996242, "y": 264.993987 },
-        { "x": 250, "y": 285 },
-        { "x": 282, "y": 265 }
-      ]
-    },
-    {
-      "primitives": [
-        {
-          "kind": "arc",
-          "motionModel": "turn-in-place",
-          "center": { "x": 225, "y": 228 },
-          "radius": 8,
-          "startAngle": 220,
-          "sweepAngle": -80
-        }
-      ],
-      "raw": [
-        { "x": 237.855752, "y": 212.679111 },
-        { "x": 225, "y": 208 },
-        { "x": 212.144248, "y": 212.679111 }
+        { "x": 235.088279, "y": 265 },
+        { "x": 267.092037, "y": 282.736 },
+        { "x": 299.095795, "y": 265 }
       ]
     },
     {
@@ -124,16 +106,33 @@
         {
           "kind": "arc",
           "motionModel": "turn-in-place",
-          "center": { "x": 275, "y": 228 },
+          "center": { "x": 230, "y": 238 },
           "radius": 8,
           "startAngle": 220,
           "sweepAngle": -80
         }
       ],
       "raw": [
-        { "x": 287.855752, "y": 212.679111 },
-        { "x": 275, "y": 208 },
-        { "x": 262.144248, "y": 212.679111 }
+        { "x": 242.855752, "y": 222.679111 },
+        { "x": 230, "y": 218 },
+        { "x": 217.144248, "y": 222.679111 }
+      ]
+    },
+    {
+      "primitives": [
+        {
+          "kind": "arc",
+          "motionModel": "turn-in-place",
+          "center": { "x": 300, "y": 238 },
+          "radius": 8,
+          "startAngle": 220,
+          "sweepAngle": -80
+        }
+      ],
+      "raw": [
+        { "x": 312.855752, "y": 222.679111 },
+        { "x": 300, "y": 218 },
+        { "x": 287.144248, "y": 222.679111 }
       ]
     }
   ]

@@ -43,6 +43,9 @@
   }
 
   function integrateDifferentialDrive(start, thetaDeg, leftSpeed, rightSpeed, durationMs, command, config) {
+    if (root.PlotterCore?.integrateDifferentialDrive) {
+      return root.PlotterCore.integrateDifferentialDrive(start, thetaDeg, leftSpeed, rightSpeed, durationMs, command, config);
+    }
     const wheelBase = Math.max(1, Number(config.deadWheelBaseMm) || 26);
     const left = deadWheelMmPerSec(leftSpeed, command, config);
     const right = deadWheelMmPerSec(rightSpeed, command, config);
@@ -72,6 +75,9 @@
   }
 
   function differentialPreviewPoints(start, thetaDeg, leftSpeed, rightSpeed, durationMs, command, config, count = 32) {
+    if (root.PlotterCore?.differentialPreviewPoints) {
+      return root.PlotterCore.differentialPreviewPoints(start, thetaDeg, leftSpeed, rightSpeed, durationMs, command, config, count);
+    }
     const points = [];
     const steps = Math.max(2, count);
     for (let i = 0; i <= steps; i += 1) {

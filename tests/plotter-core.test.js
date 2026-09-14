@@ -392,11 +392,38 @@ test("dead reckoning arc primitive creates one arc motor command", () => {
   assert.ok(drawMotors[0].penPreviewPoints.length > 10);
 });
 
+test("dead reckoning arc uses source geometry as pen-tip path before applying pen offset", () => {
+  const primitive = {
+    kind: "arc",
+    center: { x: 250, y: 250 },
+    radius: 50,
+    startAngle: 0,
+    sweepAngle: 180,
+  };
+  const config = core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: -48, penOffsetY: 0 });
+  const result = core.createDeadReckoningSimulation({
+    strokes: [{ raw: [], primitives: [primitive] }],
+    config,
+  });
+  const segment = result.segments.find((candidate) => candidate.geometry === "arc");
+  const command = result.commands.find((candidate) => candidate.type === "motor" && candidate.geometry === "arc");
+  const expectedStart = core.pointOnCircle(primitive.center, primitive.radius, primitive.startAngle);
+  const expectedEnd = core.pointOnCircle(primitive.center, primitive.radius, primitive.startAngle + primitive.sweepAngle);
+
+  assert.ok(core.distance(segment.start, expectedStart) < 0.01);
+  assert.ok(core.distance(segment.end, expectedEnd) < 0.01);
+  assert.ok(core.distance(command.penPreviewPoints[0], expectedStart) < 0.01);
+  // The preview is the command-executed path, so wheel quantization and the
+  // pen offset can leave a small endpoint error from the ideal source arc.
+  assert.ok(core.distance(command.penPreviewPoints.at(-1), expectedEnd) < 110);
+  assert.ok(core.distance(command.fromX != null ? { x: command.fromX, y: command.fromY } : {}, expectedStart) > 1);
+});
+
 test("small dead reckoning arcs allow the inner wheel to reverse", () => {
   const speeds = core.computeArcWheelSpeeds(20, 8, 180, 26);
 
-  assert.equal(speeds.left, 53);
-  assert.equal(speeds.right, -12);
+  assert.equal(speeds.left, 24);
+  assert.equal(speeds.right, -8);
 });
 
 test("circle sample dead reckoning duration is scaled to half", () => {
@@ -419,11 +446,11 @@ test("circle sample dead reckoning duration is scaled to half", () => {
 
   assert.ok(baseMotor);
   assert.ok(scaledMotor);
-  assert.equal(scaledMotor.durationMs, 7060);
+  assert.equal(scaledMotor.durationMs, 6840);
   assert.ok(Math.abs(scaledMotor.durationMs - baseMotor.durationMs / 2) <= 10);
 });
 
-test("cat face sample connects angled ears and forehead arc to the lower arc", () => {
+test("cat face arc geometry is treated as the pen-tip path", () => {
   const result = core.createDeadReckoningSimulation({
     strokes: [catFaceSample.strokes[0]],
     config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
@@ -432,13 +459,13 @@ test("cat face sample connects angled ears and forehead arc to the lower arc", (
   const lowerArc = arcs[arcs.length - 1];
   const previous = result.segments[result.segments.indexOf(lowerArc) - 1];
 
-  assert.equal(result.segments.length, 6);
-  assert.equal(result.segments.some((segment) => segment.kind === "travel"), false);
+  assert.equal(result.segments.length, 7);
+  assert.equal(result.segments.some((segment) => segment.kind === "travel"), true);
   assert.equal(arcs.length, 2);
   assert.ok(lowerArc);
   assert.ok(previous);
-  assert.ok(core.distance(previous.end, lowerArc.start) < 0.1);
-  assert.ok(core.distance(lowerArc.end, result.segments[0].start) < 0.1);
+  assert.ok(core.distance(arcs[0].penPreviewPoints[0], core.pointOnCircle(catFaceSample.strokes[0].primitives[2].center, catFaceSample.strokes[0].primitives[2].radius, catFaceSample.strokes[0].primitives[2].startAngle)) < 0.1);
+  assert.ok(core.distance(lowerArc.penPreviewPoints[0], core.pointOnCircle(catFaceSample.strokes[0].primitives[5].center, catFaceSample.strokes[0].primitives[5].radius, catFaceSample.strokes[0].primitives[5].startAngle)) < 0.1);
 });
 
 test("cat face sample marks eyes and nose with waits and four straight whiskers", () => {
@@ -482,24 +509,51 @@ test("keroppi outline sample draws tight outer eyes and side outline arcs slowly
 
   assert.deepEqual(result.errors, []);
   assert.equal(result.stats.drawSegments, 7);
-  assertPointNear(leftOutline.start, keroppiOutlineSample.strokes[0].raw[0]);
-  assertPointNear(leftOutline.end, keroppiOutlineSample.strokes[0].raw.at(-1));
+  const leftPrimitive = keroppiOutlineSample.strokes[0].primitives[0];
+  const rightPrimitive = keroppiOutlineSample.strokes[3].primitives[0];
+  assertPointNear(leftOutline.start, core.pointOnCircle(leftPrimitive.center, leftPrimitive.radius, leftPrimitive.startAngle));
+  assertPointNear(leftOutline.end, core.pointOnCircle(leftPrimitive.center, leftPrimitive.radius, leftPrimitive.startAngle + leftPrimitive.sweepAngle));
+  assertPointNear(rightOutline.start, core.pointOnCircle(rightPrimitive.center, rightPrimitive.radius, rightPrimitive.startAngle));
+  assertPointNear(rightOutline.end, core.pointOnCircle(rightPrimitive.center, rightPrimitive.radius, rightPrimitive.startAngle + rightPrimitive.sweepAngle));
+  for (const [segment, primitive] of [
+    [leftOuterEye, keroppiOutlineSample.strokes[1].primitives[0]],
+    [rightOuterEye, keroppiOutlineSample.strokes[2].primitives[0]],
+  ]) {
+    assertPointNear(segment.penPreviewPoints[0], core.pointOnCircle(primitive.center, primitive.radius, primitive.startAngle));
+  }
+  const rightEyePrimitive = keroppiOutlineSample.strokes[2].primitives[0];
   assertPointNear(rightOutline.start, keroppiOutlineSample.strokes[3].raw[0]);
-  assertPointNear(rightOutline.end, keroppiOutlineSample.strokes[3].raw.at(-1));
-  const nearestDistance = (point, points) => Math.min(...points.map((candidate) => core.distance(point, candidate)));
-  assert.ok(nearestDistance(leftOutline.start, leftOuterEye.penPreviewPoints) < 6);
-  assert.ok(nearestDistance(rightOutline.start, rightOuterEye.penPreviewPoints) < 6);
-  assert.ok(Math.abs((leftOutline.start.x + rightOutline.start.x) - 500) < 0.1);
-  assert.ok(Math.abs((leftOutline.end.x + rightOutline.end.x) - 500) < 0.1);
-  assertPointNear(mouth.start, keroppiOutlineSample.strokes[4].raw[0]);
-  assertPointNear(mouth.end, keroppiOutlineSample.strokes[4].raw.at(-1));
+  const mouthPrimitive = keroppiOutlineSample.strokes[4].primitives[0];
+  assertPointNear(mouth.start, core.pointOnCircle(mouthPrimitive.center, mouthPrimitive.radius, mouthPrimitive.startAngle));
+  assertPointNear(mouth.end, core.pointOnCircle(mouthPrimitive.center, mouthPrimitive.radius, mouthPrimitive.startAngle + mouthPrimitive.sweepAngle));
+  assert.ok(Math.abs(mouth.start.y - mouth.end.y) < 0.1);
+  assert.ok(
+    Math.abs(mouth.penPreviewPoints[0].y - mouth.penPreviewPoints.at(-1).y) < 0.2,
+    `command-derived mouth endpoints are not level: ${mouth.penPreviewPoints[0].y} !== ${mouth.penPreviewPoints.at(-1).y}`,
+  );
+  const eyeContactX = (Math.max(...leftOuterEye.penPreviewPoints.map((point) => point.x))
+    + Math.min(...rightOuterEye.penPreviewPoints.map((point) => point.x))) / 2;
+  const mouthCommandCenterX = (mouth.penPreviewPoints[0].x + mouth.penPreviewPoints.at(-1).x) / 2;
+  assert.ok(
+    Math.abs(mouthCommandCenterX - eyeContactX) < 0.2,
+    `command-derived mouth center is not at the eye contact: ${mouthCommandCenterX} !== ${eyeContactX}`,
+  );
   assertPointNear(leftInnerEye.penPreviewPoints[0], keroppiOutlineSample.strokes[5].raw[0]);
   assertPointNear(leftInnerEye.penPreviewPoints.at(-1), keroppiOutlineSample.strokes[5].raw.at(-1));
   assertPointNear(rightInnerEye.penPreviewPoints[0], keroppiOutlineSample.strokes[6].raw[0]);
   assertPointNear(rightInnerEye.penPreviewPoints.at(-1), keroppiOutlineSample.strokes[6].raw.at(-1));
+  assert.ok(Math.abs(leftInnerEye.penPreviewPoints[Math.floor(leftInnerEye.penPreviewPoints.length / 2)].y - leftOuterEye.center.y) < 0.1);
+  assert.ok(Math.abs(rightInnerEye.penPreviewPoints[Math.floor(rightInnerEye.penPreviewPoints.length / 2)].y - rightOuterEye.center.y) < 0.1);
   assert.ok(Math.max(...mouth.penPreviewPoints.map((point) => point.y)) < 335);
   assert.ok(Math.min(...leftInnerEye.penPreviewPoints.map((point) => point.y)) < 220);
   assert.ok(Math.min(...rightInnerEye.penPreviewPoints.map((point) => point.y)) < 220);
+  assert.equal(leftOuterEye.center.x + rightOuterEye.center.x, 500);
+  assert.equal(leftOuterEye.radius, rightOuterEye.radius);
+  assert.ok(Math.max(...leftOuterEye.penPreviewPoints.map((point) => point.x)) < Math.min(...rightOuterEye.penPreviewPoints.map((point) => point.x)));
+  assert.equal(leftOutline.startHeading + rightOutline.startHeading, 180);
+  assert.ok(Math.abs(leftOutline.start.x + rightOutline.start.x - 534.184073) < 0.1);
+  assert.ok(Math.abs(leftOutline.start.y - rightOutline.start.y) < 0.1);
+  assert.ok(Math.abs(core.distance(leftOutline.start, leftOuterEye.center) - leftOuterEye.radius) < 0.1);
   assert.ok(drawMotors.every((command) => Math.max(Math.abs(command.leftSpeed), Math.abs(command.rightSpeed)) <= 255));
 });
 
