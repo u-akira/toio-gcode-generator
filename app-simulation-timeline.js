@@ -53,16 +53,25 @@
             ? { x: command.fromX, y: command.fromY, theta: command.startTheta ?? command.theta ?? lastTheta ?? initialTheta }
             : null);
           if (startPose) {
-            const pose = deadMotion.integrateDifferentialDrive(
-              { x: startPose.x, y: startPose.y },
-              startPose.theta ?? lastTheta ?? initialTheta,
-              command.leftSpeed,
-              command.rightSpeed,
-              command.durationMs || 0,
-              command,
-              config,
-            );
-            lastCubePose = { x: pose.x, y: pose.y, theta: normalizeDegrees(pose.theta) };
+            const startTheta = command.startTheta ?? startPose.theta ?? lastTheta ?? initialTheta;
+            if (command.x != null && command.y != null && Math.abs((command.leftSpeed || 0) - (command.rightSpeed || 0)) < 0.001) {
+              lastCubePose = {
+                x: command.x,
+                y: command.y,
+                theta: normalizeDegrees(command.theta ?? startTheta),
+              };
+            } else {
+              const pose = deadMotion.integrateDifferentialDrive(
+                { x: startPose.x, y: startPose.y },
+                startTheta,
+                command.leftSpeed,
+                command.rightSpeed,
+                command.durationMs || 0,
+                command,
+                config,
+              );
+              lastCubePose = { x: pose.x, y: pose.y, theta: normalizeDegrees(pose.theta) };
+            }
           }
         } else if ((command.type === "move" || command.type === "rotate" || command.type === "motor" || command.type === "turn") && command.x != null && command.y != null) {
           lastCubePose = { x: command.x, y: command.y, theta: command.theta ?? lastTheta ?? initialTheta };
@@ -105,6 +114,51 @@
       return 80;
     }
 
+    function rebaseCommandPreview(command, fromCubePose, config) {
+      if (!fromCubePose || !Array.isArray(command.cubePreviewPoints) || !Array.isArray(command.penPreviewPoints)
+        || !command.cubePreviewPoints.length || !command.penPreviewPoints.length) return command;
+      const firstCube = command.cubePreviewPoints[0];
+      const firstPen = command.penPreviewPoints[0];
+      const cubeDelta = { x: fromCubePose.x - firstCube.x, y: fromCubePose.y - firstCube.y };
+      const startTheta = firstCube.theta ?? command.startTheta ?? command.theta ?? fromCubePose.theta ?? 0;
+      const targetPen = cubeToPen(fromCubePose, startTheta, config);
+      const penDelta = { x: targetPen.x - firstPen.x, y: targetPen.y - firstPen.y };
+      const translateCube = (point) => ({ ...point, x: point.x + cubeDelta.x, y: point.y + cubeDelta.y });
+      const translatePen = (point) => ({ ...point, x: point.x + penDelta.x, y: point.y + penDelta.y });
+      const cubePreviewPoints = command.cubePreviewPoints.map(translateCube);
+      const penPreviewPoints = command.penPreviewPoints.map(translatePen);
+      const lastCube = cubePreviewPoints.at(-1);
+      const lastPen = penPreviewPoints.at(-1);
+      return {
+        ...command,
+        fromX: fromCubePose.x,
+        fromY: fromCubePose.y,
+        x: lastCube.x,
+        y: lastCube.y,
+        theta: lastCube.theta ?? command.theta,
+        penX: lastPen.x,
+        penY: lastPen.y,
+        cubePreviewPoints,
+        penPreviewPoints,
+      };
+    }
+
+    function normalizeCompletedCommand(command, item, config, previousPose = null) {
+      const fromCubePose = previousPose || item?.fromCubePose;
+      if (!fromCubePose) return command;
+      if (command.type === "turn") {
+        return {
+          ...command,
+          x: fromCubePose.x,
+          y: fromCubePose.y,
+        };
+      }
+      if (command.type === "motor" && Array.isArray(command.cubePreviewPoints)) {
+        return rebaseCommandPreview(command, fromCubePose, config);
+      }
+      return command;
+    }
+
     function activeCommandIndexAtElapsed(timeline, elapsedMs) {
       if (!timeline.items.length) return -1;
       const item = timeline.items.find((entry) => elapsedMs >= entry.startMs && elapsedMs < entry.endMs);
@@ -118,17 +172,73 @@
 
     function commandsAtElapsed(timeline, elapsedMs) {
       const simulation = getSimulation();
+      const config = getConfig();
       if (!timeline.items.length) return simulation?.commands || [];
+      // A command must start where the preceding command actually ended.  Do
+      // not derive this from a freshly simulated previous item: that can use
+      // the turn's stale metadata and create a visible teleport at the
+      // boundary between travel and turn.
+      const previousCommandPose = (currentItem) => {
+        const previousCommand = simulation.commands
+          .slice(0, currentItem.commandIndex)
+          .reverse()
+          .find((candidate) => candidate?.x != null && candidate?.y != null);
+        return previousCommand
+          ? { x: previousCommand.x, y: previousCommand.y, theta: previousCommand.theta }
+          : null;
+      };
       for (const item of timeline.items) {
         if (elapsedMs >= item.endMs) {
           continue;
         }
         const endIndex = elapsedMs < item.startMs ? item.commandIndex : item.commandIndex + 1;
         const result = simulation.commands.slice(0, endIndex);
-        if (elapsedMs >= item.startMs) result[result.length - 1] = partialCommand(item, elapsedMs, timeline.mode);
+        for (const completedItem of timeline.items) {
+          if (completedItem.commandIndex >= endIndex) break;
+          const completedCommand = result[completedItem.commandIndex];
+          if (!completedCommand) continue;
+          const previousPose = previousCommandPose(completedItem);
+          result[completedItem.commandIndex] = normalizeCompletedCommand(completedCommand, completedItem, config, previousPose);
+        }
+        if (elapsedMs >= item.startMs) {
+          const previousPose = previousCommandPose(item);
+          const activeItem = previousPose
+            ? {
+                ...item,
+                fromCubePose: previousPose,
+                fromTheta: previousPose.theta ?? item.fromTheta,
+              }
+            : item;
+          let partial = partialCommand(activeItem, elapsedMs, timeline.mode);
+          if (previousPose && partial?.type === "motor" && partial.turnInPlace && Array.isArray(partial.cubePreviewPoints)) {
+            partial = rebaseCommandPreview(partial, previousPose, config);
+            partial.x = previousPose.x;
+            partial.y = previousPose.y;
+          }
+          if (partial?.type === "turn") {
+            const previousCommand = [...result.slice(0, -1)].reverse().find((candidate) => candidate?.x != null && candidate?.y != null);
+            if (previousCommand) {
+              partial.x = previousCommand.x;
+              partial.y = previousCommand.y;
+            }
+          }
+          if (partial?.type === "motor" && partial.turnInPlace) {
+            const previousCommand = [...result.slice(0, -1)].reverse().find((candidate) => candidate?.x != null && candidate?.y != null);
+            if (previousCommand) {
+              partial.x = previousCommand.x;
+              partial.y = previousCommand.y;
+            }
+          }
+          result[result.length - 1] = partial;
+        }
         return result.filter(Boolean);
       }
-      return simulation.commands;
+      return simulation.commands.map((command, commandIndex) => {
+        const item = timeline.items.find((candidate) => candidate.commandIndex === commandIndex);
+        const currentItem = timeline.items.find((candidate) => candidate.commandIndex === commandIndex);
+        const previousPose = currentItem ? previousCommandPose(currentItem) : null;
+        return normalizeCompletedCommand(command, item, config, previousPose);
+      });
     }
 
     function partialCommand(item, elapsedMs, mode) {
@@ -142,12 +252,16 @@
       if (command.type === "motor" && command.turnInPlace && command.geometry === "arc" && command.center && command.sweepAngle != null) {
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
-        const startTheta = command.startTheta ?? item.fromCubePose?.theta ?? 0;
-        const theta = normalizeDegrees(startTheta + command.sweepAngle * t);
-        const center = { x: command.center.x, y: command.center.y };
+        const executableCommand = rebaseCommandPreview(command, item.fromCubePose, config);
+        const startTheta = executableCommand.startTheta ?? item.fromCubePose?.theta ?? 0;
+        const theta = normalizeDegrees(startTheta + executableCommand.sweepAngle * t);
+        const center = executableCommand.cubePreviewPoints?.[0]
+          ? { x: executableCommand.cubePreviewPoints[0].x, y: executableCommand.cubePreviewPoints[0].y }
+          : { x: executableCommand.center.x, y: executableCommand.center.y };
         const penPoint = cubeToPen(center, theta, config);
         const previewEnd = (points, currentPoint) => {
           if (!Array.isArray(points) || !points.length) return points;
+          if (t >= 0.995) return points;
           const lastCompletedIndex = Math.floor((points.length - 1) * t);
           const result = points.slice(0, lastCompletedIndex + 1);
           const last = result[result.length - 1];
@@ -155,40 +269,139 @@
           return result;
         };
         return {
-          ...command,
+          ...executableCommand,
           x: center.x,
           y: center.y,
           theta,
           penX: penPoint.x,
           penY: penPoint.y,
-          cubePreviewPoints: previewEnd(command.cubePreviewPoints, { ...center, theta }),
-          penPreviewPoints: previewEnd(command.penPreviewPoints, penPoint),
+          cubePreviewPoints: previewEnd(executableCommand.cubePreviewPoints, { ...center, theta }),
+          penPreviewPoints: previewEnd(executableCommand.penPreviewPoints, penPoint),
+        };
+      }
+      if (command.type === "motor" && command.geometry === "line" && !command.turnInPlace
+        && command.x != null && command.y != null && command.fromX != null && command.fromY != null) {
+        const span = Math.max(1, item.endMs - item.startMs);
+        const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
+        const fromCube = item.fromCubePose || {
+          x: command.fromX,
+          y: command.fromY,
+          theta: command.startTheta ?? command.theta ?? 0,
+        };
+        const cubePoint = {
+          x: fromCube.x + (command.x - fromCube.x) * t,
+          y: fromCube.y + (command.y - fromCube.y) * t,
+        };
+        const theta = command.theta ?? fromCube.theta;
+        const penPoint = cubeToPen(cubePoint, theta, config);
+        return {
+          ...command,
+          fromX: fromCube.x,
+          fromY: fromCube.y,
+          x: cubePoint.x,
+          y: cubePoint.y,
+          theta,
+          penX: penPoint.x,
+          penY: penPoint.y,
+        };
+      }
+      if (command.type === "turn" && command.angle != null && Math.abs(command.angle) > 0.001
+        && command.theta != null && item.fromTheta != null) {
+        const span = Math.max(1, item.endMs - item.startMs);
+        const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
+        const theta = normalizeDegrees(item.fromTheta + signedAngleDelta(item.fromTheta, command.theta) * t);
+        const cubePoint = item.fromCubePose
+          ? { x: item.fromCubePose.x, y: item.fromCubePose.y }
+          : { x: command.x, y: command.y };
+        const penPoint = cubeToPen(cubePoint, theta, config);
+        return {
+          ...command,
+          x: cubePoint.x,
+          y: cubePoint.y,
+          theta,
+          penX: penPoint.x,
+          penY: penPoint.y,
         };
       }
       if ((command.type === "turn" || command.type === "motor") && (command.motionModel === "differential-drive" || (command.type === "turn" && command.leftSpeed != null && command.rightSpeed != null)) && (command.fromX != null || (command.type === "turn" && command.x != null))) {
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
-        const theta = command.type === "turn"
-          ? command.startTheta ?? item.fromCubePose?.theta ?? item.fromTheta ?? 0
-          : item.fromCubePose?.theta ?? command.startTheta ?? item.fromTheta ?? command.theta ?? 0;
-        const start = {
-          x: item.fromCubePose?.x ?? command.fromX ?? command.x,
-          y: item.fromCubePose?.y ?? command.fromY ?? command.y,
+        const interpolatePreviewPoint = (points) => {
+          if (!Array.isArray(points) || !points.length) return null;
+          const position = (points.length - 1) * t;
+          const lowerIndex = Math.floor(position);
+          const upperIndex = Math.min(points.length - 1, lowerIndex + 1);
+          const amount = position - lowerIndex;
+          const lower = points[lowerIndex];
+          const upper = points[upperIndex];
+          return {
+            x: lower.x + (upper.x - lower.x) * amount,
+            y: lower.y + (upper.y - lower.y) * amount,
+            ...(lower.theta != null && upper.theta != null
+              ? { theta: lower.theta + signedAngleDelta(lower.theta, upper.theta) * amount }
+              : {}),
+          };
         };
-        const pose = deadMotion.integrateDifferentialDrive(
-          start,
-          theta,
-          command.leftSpeed,
-          command.rightSpeed,
-          (command.durationMs || 0) * t,
-          command,
-          config,
-        );
+        const hasCommandPreview = Array.isArray(command.cubePreviewPoints)
+          && Array.isArray(command.penPreviewPoints)
+          && command.cubePreviewPoints.length > 1
+          && command.penPreviewPoints.length > 1;
+        if (hasCommandPreview) {
+          const executableCommand = rebaseCommandPreview(command, item.fromCubePose, config);
+          const currentCube = interpolatePreviewPoint(executableCommand.cubePreviewPoints);
+          const currentPen = interpolatePreviewPoint(executableCommand.penPreviewPoints);
+          const previewEnd = (points, currentPoint) => {
+            const lastCompletedIndex = Math.floor((points.length - 1) * t);
+            if (t >= 0.995) return points;
+            const result = points.slice(0, lastCompletedIndex + 1);
+            const last = result[result.length - 1];
+            if (!last || Math.hypot(last.x - currentPoint.x, last.y - currentPoint.y) >= 0.01) result.push(currentPoint);
+            return result;
+          };
+          return {
+            ...executableCommand,
+            x: currentCube.x,
+            y: currentCube.y,
+            theta: normalizeDegrees(currentCube.theta ?? command.theta ?? 0),
+            penX: currentPen.x,
+            penY: currentPen.y,
+            cubePreviewPoints: previewEnd(executableCommand.cubePreviewPoints, currentCube),
+            penPreviewPoints: previewEnd(executableCommand.penPreviewPoints, currentPen),
+          };
+        }
+        const theta = command.startTheta ?? command.theta ?? item.fromTheta ?? 0;
+        const start = item.fromCubePose
+          ? { x: item.fromCubePose.x, y: item.fromCubePose.y }
+          : {
+              x: command.fromX ?? command.x,
+              y: command.fromY ?? command.y,
+            };
+        const isStraightCommand = command.geometry === "line"
+          && !command.turnInPlace
+          && command.x != null
+          && command.y != null;
+        const pose = isStraightCommand
+          ? {
+              x: start.x + (command.x - start.x) * t,
+              y: start.y + (command.y - start.y) * t,
+              theta,
+            }
+          : deadMotion.integrateDifferentialDrive(
+              start,
+              theta,
+              command.leftSpeed,
+              command.rightSpeed,
+              (command.durationMs || 0) * t,
+              command,
+              config,
+            );
         const penPoint = cubeToPen(pose, pose.theta, config);
-        const preview = deadMotion.differentialPreviewPoints(
-          start, theta, command.leftSpeed, command.rightSpeed,
-          (command.durationMs || 0) * t, command, config,
-        );
+        const preview = isStraightCommand
+          ? [{ x: start.x, y: start.y, theta }, { x: pose.x, y: pose.y, theta }]
+          : deadMotion.differentialPreviewPoints(
+              start, theta, command.leftSpeed, command.rightSpeed,
+              (command.durationMs || 0) * t, command, config,
+            );
         return {
           ...command,
           x: pose.x,
@@ -204,9 +417,15 @@
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
         const theta = item.fromTheta + signedAngleDelta(item.fromTheta, command.theta) * t;
-        const penPoint = command.x != null && command.y != null ? cubeToPen({ x: command.x, y: command.y }, theta, config) : null;
+        const cubePoint = item.fromCubePose
+          ? { x: item.fromCubePose.x, y: item.fromCubePose.y }
+          : command.x != null && command.y != null
+            ? { x: command.x, y: command.y }
+            : null;
+        const penPoint = cubePoint ? cubeToPen(cubePoint, theta, config) : null;
         return {
           ...command,
+          ...(cubePoint ? { x: cubePoint.x, y: cubePoint.y } : {}),
           theta,
           penX: penPoint ? penPoint.x : command.penX,
           penY: penPoint ? penPoint.y : command.penY,
@@ -225,6 +444,7 @@
         const previewEnd = (points, currentPoint) => {
           if (!Array.isArray(points)) return points;
           if (!points.length || !currentPoint) return points;
+          if (t >= 0.995) return points;
           const lastCompletedIndex = Math.floor((points.length - 1) * t);
           const result = points.slice(0, lastCompletedIndex + 1);
           const last = result[result.length - 1];

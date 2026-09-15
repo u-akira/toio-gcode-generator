@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "mat": {
+    "minX": 98,
+    "minY": 142,
+    "maxX": 402,
+    "maxY": 358
+  },
+  "config": {
+    "safeScale": 0.75,
+    "fixedHeading": 0,
+    "penOffsetX": -20,
+    "penOffsetY": 0,
+    "rotationCenterOffsetX": 0,
+    "rotationCenterOffsetY": 0,
+    "drawSpeed": 20,
+    "travelSpeed": 20,
+    "smoothing": 0.35,
+    "minPointDistance": 4,
+    "cornerAngle": 42,
+    "lineCorrection": 1,
+    "lineTolerance": 10,
+    "minSegmentLength": 12,
+    "upMotorSpeed": -30,
+    "upDurationMs": 300,
+    "downMotorSpeed": 30,
+    "downDurationMs": 300,
+    "penMotorMode": 0,
+    "settleMs": 700,
+    "deadTurnSpeed": 8,
+    "deadTurnBalanceTrim": 0,
+    "deadTurnMsPer90": 1023,
+    "deadMmPerSecAtDrawSpeed": 56,
+    "deadArcMmPerSecAtDrawSpeed": 29.84,
+    "deadMmPerSecAtTravelSpeed": 54,
+    "deadTravelDistanceScale": 1,
+    "deadWheelBaseMm": 26
+  },
+  "strokes": [
+    {
+      "primitives": [
+        { "kind": "line", "start": { "x": 170, "y": 260 }, "end": { "x": 220, "y": 260 } }
+      ],
+      "raw": [
+        { "x": 170, "y": 260 },
+        { "x": 220, "y": 260 }
+      ]
+    },
+    {
+      "primitives": [
+        { "kind": "arc", "center": { "x": 260, "y": 260 }, "radius": 30, "startAngle": 180, "sweepAngle": 180 }
+      ],
+      "raw": [
+        { "x": 230, "y": 260 },
+        { "x": 260, "y": 290 },
+        { "x": 290, "y": 260 }
+      ]
+    },
+    {
+      "primitives": [
+        { "kind": "arc", "motionModel": "turn-in-place", "center": { "x": 250, "y": 210 }, "radius": 10, "startAngle": 220, "sweepAngle": -80 }
+      ],
+      "raw": [
+        { "x": 242.34, "y": 203.57 },
+        { "x": 250, "y": 200 },
+        { "x": 257.66, "y": 203.57 }
+      ]
+    },
+    {
+      "primitives": [
+        { "kind": "line", "start": { "x": 290, "y": 300 }, "end": { "x": 220, "y": 300 } }
+      ],
+      "raw": [
+        { "x": 290, "y": 300 },
+        { "x": 220, "y": 300 }
+      ]
+    }
+  ]
+}

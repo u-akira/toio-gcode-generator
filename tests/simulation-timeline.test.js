@@ -209,7 +209,7 @@ test("dead reckoning edited differential command animates its computed path", ()
   assert.ok(frame.penPreviewPoints.length > 2);
 });
 
-test("dead reckoning line animation follows wheel motion instead of stale endpoint coordinates", () => {
+test("dead reckoning line animation follows the command endpoint continuously", () => {
   const config = core.withDefaults({ penOffsetX: 0, penOffsetY: 0, deadWheelBaseMm: 26, deadMmPerSecAtTravelSpeed: 30 });
   const commands = [
     {
@@ -223,8 +223,8 @@ test("dead reckoning line animation follows wheel motion instead of stale endpoi
   const timeline = tools.buildSimulationTimeline(commands);
   const frame = tools.commandsAtElapsed(timeline, 500).at(-1);
 
-  assert.ok(Math.abs(frame.x) < 0.001);
-  assert.ok(Math.abs(frame.y - 15) < 0.001);
+  assert.ok(Math.abs(frame.x - 50) < 0.001);
+  assert.ok(Math.abs(frame.y) < 0.001);
 });
 
 test("dead reckoning straight draw animation uses straight-line calibration", () => {

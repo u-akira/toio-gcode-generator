@@ -397,7 +397,9 @@
       if (primitive.kind === "arc") {
         const arc = normalizeArcPrimitive(primitive);
         if (!arc) return null;
-        return cubeToPen(pointOnCircle(arc.center, arc.radius, arc.startAngle), arc.startHeading, this.config);
+        return arc.motionModel === "turn-in-place"
+          ? cubeToPen(arc.center, arc.startHeading, this.config)
+          : pointOnCircle(arc.center, arc.radius, arc.startAngle);
       }
       return null;
     }
@@ -417,9 +419,14 @@
       if (primitive.kind === "arc") {
         const arc = normalizeArcPrimitive(primitive);
         if (!arc) return null;
+        const penStart = arc.motionModel === "turn-in-place"
+          ? cubeToPen(arc.center, arc.startHeading, this.config)
+          : pointOnCircle(arc.center, arc.radius, arc.startAngle);
         return {
-          point: cubeToPen(pointOnCircle(arc.center, arc.radius, arc.startAngle), arc.startHeading, this.config),
-          cube: arc.motionModel === "turn-in-place" ? { ...arc.center } : null,
+          point: penStart,
+          cube: arc.motionModel === "turn-in-place"
+            ? { ...arc.center }
+            : penToCube(penStart, arc.startHeading, this.config),
           heading: arc.startHeading,
           targetSegmentId: `seg-${this.segmentIndex + 1}`,
         };

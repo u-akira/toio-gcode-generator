@@ -459,7 +459,7 @@ test("cat face arc geometry is treated as the pen-tip path", () => {
   const lowerArc = arcs[arcs.length - 1];
   const previous = result.segments[result.segments.indexOf(lowerArc) - 1];
 
-  assert.equal(result.segments.length, 7);
+  assert.equal(result.segments.length, 9);
   assert.equal(result.segments.some((segment) => segment.kind === "travel"), true);
   assert.equal(arcs.length, 2);
   assert.ok(lowerArc);
@@ -503,12 +503,73 @@ test("keroppi outline sample draws tight outer eyes and side outline arcs slowly
   const mouth = drawSegments[4];
   const leftInnerEye = drawSegments[5];
   const rightInnerEye = drawSegments[6];
+  const travelToLeftEye = result.commands.find((command) => command.type === "motor" && command.segmentId === "seg-1");
   const assertPointNear = (actual, expected) => {
     assert.ok(core.distance(actual, expected) < 0.1, `${JSON.stringify(actual)} !== ${JSON.stringify(expected)}`);
   };
 
   assert.deepEqual(result.errors, []);
   assert.equal(result.stats.drawSegments, 7);
+  assert.ok(travelToLeftEye);
+  assert.ok(Math.hypot(
+    travelToLeftEye.x - leftOuterEye.startCube.x,
+    travelToLeftEye.y - leftOuterEye.startCube.y,
+  ) < 0.1);
+  const travelEndPose = core.integrateDifferentialDrive(
+    { x: travelToLeftEye.fromX, y: travelToLeftEye.fromY },
+    travelToLeftEye.startTheta,
+    travelToLeftEye.leftSpeed,
+    travelToLeftEye.rightSpeed,
+    travelToLeftEye.durationMs,
+    travelToLeftEye,
+    core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+  );
+  assert.ok(Math.hypot(
+    travelEndPose.x - travelToLeftEye.x,
+    travelEndPose.y - travelToLeftEye.y,
+  ) < 0.1);
+  const travelToRightEye = result.commands.find((command) => command.type === "motor" && command.segmentId === "seg-3");
+  const travelRightEndPose = core.integrateDifferentialDrive(
+    { x: travelToRightEye.fromX, y: travelToRightEye.fromY },
+    travelToRightEye.startTheta,
+    travelToRightEye.leftSpeed,
+    travelToRightEye.rightSpeed,
+    travelToRightEye.durationMs,
+    travelToRightEye,
+    core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+  );
+  assert.ok(Math.hypot(
+    travelRightEndPose.x - travelToRightEye.x,
+    travelRightEndPose.y - travelToRightEye.y,
+  ) < 0.1);
+  const travelToFace = result.commands.find((command) => command.type === "motor" && command.segmentId === "seg-5");
+  const travelFaceEndPose = core.integrateDifferentialDrive(
+    { x: travelToFace.fromX, y: travelToFace.fromY },
+    travelToFace.startTheta,
+    travelToFace.leftSpeed,
+    travelToFace.rightSpeed,
+    travelToFace.durationMs,
+    travelToFace,
+    core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+  );
+  assert.ok(Math.hypot(
+    travelFaceEndPose.x - travelToFace.x,
+    travelFaceEndPose.y - travelToFace.y,
+  ) < 0.1);
+  const travelToMouth = result.commands.find((command) => command.type === "motor" && command.segmentId === "seg-7");
+  const travelMouthEndPose = core.integrateDifferentialDrive(
+    { x: travelToMouth.fromX, y: travelToMouth.fromY },
+    travelToMouth.startTheta,
+    travelToMouth.leftSpeed,
+    travelToMouth.rightSpeed,
+    travelToMouth.durationMs,
+    travelToMouth,
+    core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+  );
+  assert.ok(Math.hypot(
+    travelMouthEndPose.x - travelToMouth.x,
+    travelMouthEndPose.y - travelToMouth.y,
+  ) < 0.2);
   const leftPrimitive = keroppiOutlineSample.strokes[0].primitives[0];
   const rightPrimitive = keroppiOutlineSample.strokes[3].primitives[0];
   assertPointNear(leftOutline.start, core.pointOnCircle(leftPrimitive.center, leftPrimitive.radius, leftPrimitive.startAngle));
