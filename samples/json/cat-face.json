@@ -7,7 +7,7 @@
       "primitives": [
         {
           "kind": "line",
-          "start": { "x": 180, "y": 260 },
+          "start": { "x": 182, "y": 260 },
           "end": { "x": 196, "y": 178 }
         },
         {
@@ -18,8 +18,8 @@
         {
           "kind": "arc",
           "center": { "x": 250, "y": 260 },
-          "radius": 50.151282,
-          "startAngle": 246.741787,
+          "radius": 54,
+          "startAngle": 225,
           "sweepAngle": 90
         },
         {
@@ -30,13 +30,13 @@
         {
           "kind": "line",
           "start": { "x": 304, "y": 178 },
-          "end": { "x": 320, "y": 260 }
+          "end": { "x": 318, "y": 260 }
         },
         {
           "kind": "arc",
           "center": { "x": 250, "y": 260 },
-          "radius": 67.068181,
-          "startAngle": 16.604791,
+          "radius": 68,
+          "startAngle": 0,
           "sweepAngle": 180
         }
       ],

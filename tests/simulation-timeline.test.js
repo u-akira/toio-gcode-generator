@@ -5,6 +5,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const core = require("../plotter-core.js");
+const catFaceSample = require("../samples/json/cat-face.json");
 
 function loadTimelineTools({ commands, config, mode = "position", commandExecutor = null }) {
   const context = { window: {}, Math };
@@ -327,6 +328,47 @@ test("dead reckoning straight draw animation uses straight-line calibration", ()
 
   assert.ok(Math.abs(frame.x - 70) < 0.01);
   assert.ok(Math.abs(frame.y) < 0.01);
+});
+
+test("cat face command 66 keeps the right whisker angle from play to completion", () => {
+  const simulation = core.createDeadReckoningSimulation({
+    strokes: catFaceSample.strokes,
+    config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+  });
+  const command66 = simulation.commands[65];
+  const source = catFaceSample.strokes[6].primitives[0];
+  const expectedAngle = Math.atan2(source.end.y - source.start.y, source.end.x - source.start.x) * 180 / Math.PI;
+  const tools = loadTimelineTools({ commands: simulation.commands, config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }), mode: "dead" });
+  const timeline = tools.buildSimulationTimeline(simulation.commands);
+  const item = timeline.items.find((candidate) => candidate.commandIndex === 65);
+
+  assert.equal(command66.kind, "draw");
+  assert.ok(item);
+  const frameAtPlay = tools.commandsAtElapsed(
+    timeline,
+    item.startMs + (item.endMs - item.startMs) / 2,
+  )
+    .filter((command) => command.segmentId === command66.segmentId && command.kind === "draw")
+    .at(-1);
+  const frameAtCompletion = tools.commandsAtElapsed(timeline, item.endMs + 1)
+    .filter((command) => command.segmentId === command66.segmentId && command.kind === "draw")
+    .at(-1);
+
+  assert.ok(frameAtPlay?.penPreviewPoints?.length >= 2);
+  assert.ok(frameAtCompletion?.penPreviewPoints?.length >= 2);
+  const angleOf = (frame) => {
+    const points = frame.penPreviewPoints;
+    return Math.atan2(points.at(-1).y - points[0].y, points.at(-1).x - points[0].x) * 180 / Math.PI;
+  };
+  const playAngle = angleOf(frameAtPlay);
+  const completionAngle = angleOf(frameAtCompletion);
+
+  assert.ok(
+    Math.abs(completionAngle - playAngle) < 1,
+    `command 66 changed angle from ${playAngle.toFixed(2)}° while playing to ${completionAngle.toFixed(2)}° after completion`,
+  );
+  assert.ok(Math.abs(playAngle - expectedAngle) < 1);
+  assert.ok(Math.abs(completionAngle - expectedAngle) < 1);
 });
 
 test("dead reckoning travel animation starts from the previous command pose", () => {

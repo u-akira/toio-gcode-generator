@@ -475,11 +475,21 @@ test("cat face arc geometry is treated as the pen-tip path", () => {
   const lowerArc = arcs[arcs.length - 1];
   const previous = result.segments[result.segments.indexOf(lowerArc) - 1];
 
-  assert.equal(result.segments.length, 9);
+  assert.equal(result.segments.length, 7);
   assert.equal(result.segments.some((segment) => segment.kind === "travel"), true);
   assert.equal(arcs.length, 2);
   assert.ok(lowerArc);
   assert.ok(previous);
+  assert.ok(core.distance(arcs[0].start, catFaceSample.strokes[0].primitives[1].end) < 0.1);
+  assert.ok(core.distance(arcs[0].end, catFaceSample.strokes[0].primitives[3].start) < 0.1);
+  assert.ok(core.distance(
+    core.pointOnCircle(catFaceSample.strokes[0].primitives[5].center, catFaceSample.strokes[0].primitives[5].radius, catFaceSample.strokes[0].primitives[5].startAngle),
+    catFaceSample.strokes[0].primitives[4].end,
+  ) < 0.1);
+  assert.ok(core.distance(
+    core.pointOnCircle(catFaceSample.strokes[0].primitives[5].center, catFaceSample.strokes[0].primitives[5].radius, catFaceSample.strokes[0].primitives[5].startAngle + catFaceSample.strokes[0].primitives[5].sweepAngle),
+    catFaceSample.strokes[0].primitives[0].start,
+  ) < 0.1);
   assert.ok(core.distance(arcs[0].penPreviewPoints[0], core.pointOnCircle(catFaceSample.strokes[0].primitives[2].center, catFaceSample.strokes[0].primitives[2].radius, catFaceSample.strokes[0].primitives[2].startAngle)) < 0.1);
   assert.ok(core.distance(lowerArc.penPreviewPoints[0], core.pointOnCircle(catFaceSample.strokes[0].primitives[5].center, catFaceSample.strokes[0].primitives[5].radius, catFaceSample.strokes[0].primitives[5].startAngle)) < 0.1);
 });
@@ -1043,6 +1053,60 @@ test("dojo sample draws the j dot with the same point wait as stack-chan eyes", 
   assert.ok(dojoDot);
   assert.ok(stackChanEye);
   assert.equal(dojoDot.waitMs, stackChanEye.waitMs);
+});
+
+test("cat face command 66 starts drawing at the preceding pen position", () => {
+  const result = core.createDeadReckoningSimulation({
+    strokes: catFaceSample.strokes,
+    config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+  });
+  const command66 = result.commands[65];
+  const previousCommand = result.commands[64];
+
+  assert.equal(command66.kind, "draw");
+  assert.equal(command66.geometry, "line");
+  assert.ok(previousCommand.penX != null);
+  assert.ok(command66.penPreviewPoints?.length >= 2);
+  assert.ok(
+    core.distance(
+      { x: previousCommand.penX, y: previousCommand.penY },
+      command66.penPreviewPoints[0],
+    ) < 1,
+    `command 66 starts ${core.distance(
+      { x: previousCommand.penX, y: previousCommand.penY },
+      command66.penPreviewPoints[0],
+    ).toFixed(2)}mm from the preceding pen position`,
+  );
+});
+
+test("cat face right whisker command paths keep their source direction", () => {
+  const result = core.createDeadReckoningSimulation({
+    strokes: catFaceSample.strokes,
+    config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+  });
+  const rightWhiskers = catFaceSample.strokes.slice(6).map((stroke) => stroke.primitives[0]);
+  const rightWhiskerSegments = result.segments
+    .filter((segment) => segment.kind === "draw" && segment.geometry === "line")
+    .slice(-2);
+
+  assert.equal(rightWhiskerSegments.length, rightWhiskers.length);
+  rightWhiskers.forEach((primitive, index) => {
+    const expected = { x: primitive.end.x - primitive.start.x, y: primitive.end.y - primitive.start.y };
+    const actualPoints = rightWhiskerSegments[index].penPreviewPoints;
+    const actual = {
+      x: actualPoints.at(-1).x - actualPoints[0].x,
+      y: actualPoints.at(-1).y - actualPoints[0].y,
+    };
+    const dot = actual.x * expected.x + actual.y * expected.y;
+    const expectedAngle = Math.atan2(expected.y, expected.x) * 180 / Math.PI;
+    const actualAngle = Math.atan2(actual.y, actual.x) * 180 / Math.PI;
+
+    assert.ok(dot > 0, `right whisker ${index + 1} reversed direction`);
+    assert.ok(
+      Math.abs(actualAngle - expectedAngle) < 1,
+      `right whisker ${index + 1} changed angle from ${expectedAngle.toFixed(2)}° to ${actualAngle.toFixed(2)}°`,
+    );
+  });
 });
 
 test("signed angle delta returns the shortest turn", () => {
