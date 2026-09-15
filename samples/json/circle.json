@@ -4,7 +4,7 @@
   "mat": { "minX": 98, "minY": 142, "maxX": 402, "maxY": 358 },
   "deadSegmentSettings": {
     "seg-0": {
-      "durationScale": 0.5
+      "durationScale": 1
     }
   },
   "strokes": [

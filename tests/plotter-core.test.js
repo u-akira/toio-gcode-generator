@@ -426,7 +426,7 @@ test("small dead reckoning arcs allow the inner wheel to reverse", () => {
   assert.equal(speeds.right, -8);
 });
 
-test("circle sample dead reckoning duration is scaled to half", () => {
+test("circle sample dead reckoning follows the full measured sweep", () => {
   const baseSample = {
     ...circleSample,
     deadSegmentSettings: {},
@@ -446,8 +446,11 @@ test("circle sample dead reckoning duration is scaled to half", () => {
 
   assert.ok(baseMotor);
   assert.ok(scaledMotor);
-  assert.equal(scaledMotor.durationMs, 6840);
-  assert.ok(Math.abs(scaledMotor.durationMs - baseMotor.durationMs / 2) <= 10);
+  assert.equal(scaledMotor.durationMs, baseMotor.durationMs);
+  assert.ok(Math.abs(scaledMotor.durationMs - 7370) <= 10);
+  const start = scaledMotor.penPreviewPoints[0];
+  const end = scaledMotor.penPreviewPoints.at(-1);
+  assert.ok(Math.hypot(end.x - start.x, end.y - start.y) < 1);
 });
 
 test("cat face arc geometry is treated as the pen-tip path", () => {

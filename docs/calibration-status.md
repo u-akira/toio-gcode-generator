@@ -18,7 +18,7 @@ Web上の設定から計算したコマンドを実機で描画し、シミュ�
 | --- | ---: | --- |
 | `deadTurnMsPer90` | 1023 | turn |
 | `deadMmPerSecAtDrawSpeed` | 56 | 直線 draw |
-| `deadArcMmPerSecAtDrawSpeed` | 29.84 | 円弧 draw |
+| `deadArcMmPerSecAtDrawSpeed` | 55.43 | 円弧 draw |
 | `deadMmPerSecAtTravelSpeed` | 54 | pen-up travel |
 
 ## 設定値とtoioコマンドの対応
@@ -68,8 +68,8 @@ Web上の設定から計算したコマンドを実機で描画し、シミュ�
 
 ### 円
 
-- 正確な実測は未実施。
-- 現時点ではシミュレーションと比較的一致している。
+- `data/circle-copy-paper.json` の実測コマンド（左右24/16、7370ms）を基準に、円弧drawの共通校正値を `55.43` に更新した。
+- 円だけの個別倍率ではなく、他の円弧サンプルにも同じ校正値を適用する。
 - 円弧用の `deadArcMmPerSecAtDrawSpeed` は、直線 draw と分けて評価する。
 
 ### 四角
