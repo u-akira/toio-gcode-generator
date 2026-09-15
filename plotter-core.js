@@ -584,8 +584,11 @@
       const isTurnInPlace = arc.motionModel === "turn-in-place";
       const penStart = pointOnCircle(arc.center, arc.radius, arc.startAngle);
       const penEnd = pointOnCircle(arc.center, arc.radius, arc.startAngle + arc.sweepAngle);
-      const usePenArcMotion = !isTurnInPlace && Number.isFinite(Number(primitive.startHeading));
-      const penMotion = usePenArcMotion ? solvePenArcMotion(arc, penStart, config) : null;
+      const hasExplicitStartHeading = Number.isFinite(Number(primitive.startHeading));
+      const usePenArcMotion = !isTurnInPlace;
+      const penMotion = usePenArcMotion
+        ? solvePenArcMotion(hasExplicitStartHeading ? arc : { ...arc, startHeading: undefined }, penStart, config)
+        : null;
       const motionStartHeading = usePenArcMotion ? penMotion.startHeading : arc.startHeading;
       const motionEndHeading = isTurnInPlace ? arc.endHeading : normalizeDegrees(motionStartHeading + arc.sweepAngle);
       const arcLengthMm = arc.radius * Math.abs(degToRad(arc.sweepAngle));
