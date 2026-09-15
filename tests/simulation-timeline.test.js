@@ -209,7 +209,7 @@ test("dead reckoning edited differential command animates its computed path", ()
   assert.ok(frame.penPreviewPoints.length > 2);
 });
 
-test("dead reckoning line animation follows the command endpoint continuously", () => {
+test("dead reckoning travel animation follows the command endpoint continuously", () => {
   const config = core.withDefaults({ penOffsetX: 0, penOffsetY: 0, deadWheelBaseMm: 26, deadMmPerSecAtTravelSpeed: 30 });
   const commands = [
     {

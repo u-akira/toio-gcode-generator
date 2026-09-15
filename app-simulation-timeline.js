@@ -279,7 +279,7 @@
           penPreviewPoints: previewEnd(executableCommand.penPreviewPoints, penPoint),
         };
       }
-      if (command.type === "motor" && command.geometry === "line" && !command.turnInPlace
+      if (command.type === "motor" && command.kind === "travel" && command.geometry === "line" && !command.turnInPlace
         && command.x != null && command.y != null && command.fromX != null && command.fromY != null) {
         const span = Math.max(1, item.endMs - item.startMs);
         const t = clamp((elapsedMs - item.startMs) / span, 0, 1);
@@ -376,7 +376,8 @@
               x: command.fromX ?? command.x,
               y: command.fromY ?? command.y,
             };
-        const isStraightCommand = command.geometry === "line"
+        const isStraightCommand = command.kind === "travel"
+          && command.geometry === "line"
           && !command.turnInPlace
           && command.x != null
           && command.y != null;
