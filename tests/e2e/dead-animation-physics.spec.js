@@ -573,6 +573,35 @@ test("edited triangle draw animation remains physically continuous", async ({ pa
   }
 });
 
+test("triangle command 6 straight animates continuously before reaching its endpoint", async ({ page }) => {
+  await page.goto("/");
+  await page.selectOption("#sampleSelect", "samples/json/triangle.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const result = await page.evaluate(() => {
+    const timeline = window.__toioTest.getAnimationSnapshot();
+    const item = timeline.items.find((candidate) => candidate.commandIndex === 5);
+    const command = window.__toioTest.getCommands()[5];
+    const midpoint = (item.startMs + item.endMs) / 2;
+    window.__toioTest.seekAnimation(midpoint);
+    const middle = window.__toioTest.getAnimationSnapshot().commands[5];
+    const preview = window.__toioTest.getDeadPreview();
+    return { item, command, middle, preview: preview.cubePath.at(-1) };
+  });
+
+  expect(result.item).toBeDefined();
+  expect(result.command.kind).toBe("travel");
+  expect(result.middle.x).toBeGreaterThan(Math.min(result.command.fromX, result.command.x));
+  expect(result.middle.x).toBeLessThan(Math.max(result.command.fromX, result.command.x));
+  expect(result.middle.y).toBeGreaterThan(Math.min(result.command.fromY, result.command.y));
+  expect(result.middle.y).toBeLessThan(Math.max(result.command.fromY, result.command.y));
+  expect(result.preview.x).toBeGreaterThan(Math.min(result.command.fromX, result.command.x));
+  expect(result.preview.x).toBeLessThan(Math.max(result.command.fromX, result.command.x));
+  expect(result.preview.y).toBeGreaterThan(Math.min(result.command.fromY, result.command.y));
+  expect(result.preview.y).toBeLessThan(Math.max(result.command.fromY, result.command.y));
+});
+
 test("edited wave arc animation remains physically continuous", async ({ page }) => {
   await page.goto("/");
   await page.locator("#importInput").setInputFiles("data/wave-copy-paper.json");

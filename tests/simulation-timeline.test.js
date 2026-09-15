@@ -6,26 +6,110 @@ const vm = require("node:vm");
 
 const core = require("../plotter-core.js");
 
-function loadTimelineTools({ commands, config, mode = "position" }) {
+function loadTimelineTools({ commands, config, mode = "position", commandExecutor = null }) {
   const context = { window: {}, Math };
   vm.createContext(context);
   const deadMotionSource = fs.readFileSync(path.join(__dirname, "..", "app-dead-motion.js"), "utf8");
   vm.runInContext(deadMotionSource, context);
+  const executorSource = fs.readFileSync(path.join(__dirname, "..", "app-command-executor.js"), "utf8");
+  vm.runInContext(executorSource, context);
   const source = fs.readFileSync(path.join(__dirname, "..", "app-simulation-timeline.js"), "utf8");
   vm.runInContext(source, context);
-  return context.window.ToioPlotterTimeline.createSimulationTimelineTools({
+  const timelineApi = context.ToioPlotterTimeline || context.window.ToioPlotterTimeline;
+  const executorApi = context.ToioPlotterCommandExecutor || context.window.ToioPlotterCommandExecutor;
+  const defaultCommandExecutor = executorApi.createCommandExecutor({
+    cubeToPen: core.cubeToPen,
+    clamp: (value, min, max) => Math.min(max, Math.max(min, value)),
+    normalizeDegrees: (degrees) => ((degrees % 360) + 360) % 360,
+    signedAngleDelta: core.signedAngleDelta,
+    deadMotion: context.ToioPlotterDeadMotion || context.window.ToioPlotterDeadMotion,
+  });
+  return timelineApi.createSimulationTimelineTools({
     getSimulation: () => ({ commands, mode }),
     getConfig: () => config,
-    cubeToPen: core.cubeToPen,
     clamp: (value, min, max) => Math.min(max, Math.max(min, value)),
     distance: core.distance,
     normalizeDegrees: (degrees) => ((degrees % 360) + 360) % 360,
-    signedAngleDelta: core.signedAngleDelta,
-    pointOnCircle: core.pointOnCircle,
     minTurnDurationMs: 120,
-    deadMotion: context.window.ToioPlotterDeadMotion,
+    commandExecutor: commandExecutor || defaultCommandExecutor,
   });
 }
+
+function loadCommandExecutor() {
+  const context = { window: {}, Math };
+  vm.createContext(context);
+  const source = fs.readFileSync(path.join(__dirname, "..", "app-command-executor.js"), "utf8");
+  vm.runInContext(source, context);
+  const executorApi = context.ToioPlotterCommandExecutor || context.window.ToioPlotterCommandExecutor;
+  return executorApi.createCommandExecutor({
+    cubeToPen: core.cubeToPen,
+    clamp: (value, min, max) => Math.min(max, Math.max(min, value)),
+    normalizeDegrees: (degrees) => ((degrees % 360) + 360) % 360,
+    signedAngleDelta: core.signedAngleDelta,
+  });
+}
+
+test("command executor keeps travel and draw line execution explicit", () => {
+  const executor = loadCommandExecutor();
+  const config = core.withDefaults({ penOffsetX: 0, penOffsetY: 0 });
+  const travel = executor.execute({
+    type: "motor", kind: "travel", geometry: "line",
+    fromX: 0, fromY: 0, x: 100, y: 0, theta: 0,
+  }, { progress: 0.5, config });
+  const draw = executor.execute({
+    type: "motor", kind: "draw", geometry: "line",
+    fromX: 0, fromY: 0, x: 100, y: 0, theta: 0,
+  }, { progress: 0.5, config });
+  assert.deepEqual({ x: travel.x, y: travel.y }, { x: 50, y: 0 });
+  assert.deepEqual({ x: draw.x, y: draw.y }, { x: 50, y: 0 });
+});
+
+test("command executor animates travel commands without a geometry field", () => {
+  const executor = loadCommandExecutor();
+  const config = core.withDefaults({ penOffsetX: 0, penOffsetY: 0 });
+  const middle = executor.execute({
+    type: "motor",
+    kind: "travel",
+    fromX: 10,
+    fromY: 20,
+    x: 10,
+    y: 90,
+    theta: 90,
+  }, { progress: 0.5, config });
+
+  assert.deepEqual({ x: middle.x, y: middle.y }, { x: 10, y: 55 });
+});
+
+test("timeline derives subsequent poses from the command executor", () => {
+  const calls = [];
+  const commandExecutor = {
+    execute(command, options) {
+      calls.push({ command, options });
+      return { x: 42, y: 43, theta: 44, penX: 42, penY: 43 };
+    },
+    rebasePreview: (command) => command,
+  };
+  const config = core.withDefaults({ penOffsetX: 0, penOffsetY: 0 });
+  const commands = [
+    {
+      type: "motor", kind: "draw", geometry: "arc",
+      leftSpeed: 16, rightSpeed: 8, durationMs: 1000,
+      fromX: 0, fromY: 0, x: 10, y: 10, theta: 20,
+    },
+    {
+      type: "motor", kind: "travel", geometry: "line",
+      leftSpeed: 20, rightSpeed: 20, durationMs: 500,
+      fromX: 10, fromY: 10, x: 80, y: 10, theta: 20,
+    },
+  ];
+  const tools = loadTimelineTools({ commands, config, mode: "dead", commandExecutor });
+  const timeline = tools.buildSimulationTimeline(commands);
+
+  assert.equal(calls.length, 2);
+  assert.equal(timeline.items[1].fromCubePose.x, 42);
+  assert.equal(timeline.items[1].fromCubePose.y, 43);
+  assert.equal(timeline.items[1].fromCubePose.theta, 44);
+});
 
 test("position id travel move animation turns before translating sideways", () => {
   const config = core.withDefaults({ penOffsetX: -48, penOffsetY: 0 });

@@ -12,6 +12,10 @@ function loadCanvasRenderer({ config }) {
   vm.createContext(context);
   const deadMotionSource = fs.readFileSync(path.join(__dirname, "..", "app-dead-motion.js"), "utf8");
   vm.runInContext(deadMotionSource, context);
+  const executorSource = fs.readFileSync(path.join(__dirname, "..", "app-command-executor.js"), "utf8");
+  vm.runInContext(executorSource, context);
+  const previewSource = fs.readFileSync(path.join(__dirname, "..", "app-command-preview.js"), "utf8");
+  vm.runInContext(previewSource, context);
   const source = fs.readFileSync(path.join(__dirname, "..", "app-canvas.js"), "utf8");
   vm.runInContext(source, context);
   return context.ToioPlotterCanvas.createCanvasRenderer({
@@ -44,6 +48,13 @@ function loadCanvasRenderer({ config }) {
     distance: core.distance,
     degToRad: (degrees) => degrees * Math.PI / 180,
     primitivePreviewPoints: core.primitivePreviewPoints,
+    commandExecutor: (context.ToioPlotterCommandExecutor || context.window.ToioPlotterCommandExecutor).createCommandExecutor({
+      cubeToPen: core.cubeToPen,
+      clamp: (value, min, max) => Math.max(min, Math.min(max, value)),
+      normalizeDegrees: (value) => ((value % 360) + 360) % 360,
+      signedAngleDelta: core.signedAngleDelta,
+      deadMotion: context.ToioPlotterDeadMotion,
+    }),
   });
 }
 

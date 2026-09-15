@@ -11,7 +11,6 @@ function loadCommandEditor({
   outputEl = null,
   getActiveCommandIndex = () => -1,
   getConfig = () => ({}),
-  penToCube = (point) => point,
   cubeToPen = (point) => point,
   turnWheelSpeeds = () => ({ left: 0, right: 0 }),
   computeArcWheelSpeedsForDuration,
@@ -20,8 +19,11 @@ function loadCommandEditor({
   vm.createContext(context);
   const deadMotionSource = fs.readFileSync(path.join(__dirname, "..", "app-dead-motion.js"), "utf8");
   vm.runInContext(deadMotionSource, context);
+  const reflowSource = fs.readFileSync(path.join(__dirname, "..", "app-command-reflow.js"), "utf8");
+  vm.runInContext(reflowSource, context);
   const source = fs.readFileSync(path.join(__dirname, "..", "app-command-editor.js"), "utf8");
   vm.runInContext(source, context);
+  const reflowApi = context.ToioPlotterCommandReflow || context.window.ToioPlotterCommandReflow;
   return context.window.ToioPlotterCommandEditor.createCommandEditor({
     outputEl,
     getSimulation: () => ({ commands }),
@@ -39,14 +41,21 @@ function loadCommandEditor({
     turnWheelSpeeds,
     computeArcWheelSpeedsForDuration,
     turnMsPer90: () => 660,
-    penToCube,
     cubeToPen,
-    degToRad: (degrees) => degrees * Math.PI / 180,
     normalizeDegrees: (degrees) => ((degrees % 360) + 360) % 360,
     syncSimulationControls: () => {},
     focusCommand: () => true,
     getActiveCommandIndex,
     draw: () => {},
+    commandReflow: reflowApi.createCommandReflow({
+      getSimulation: () => ({ commands }),
+      getConfig,
+      isDeadMode: () => true,
+      deadMotion: context.window.ToioPlotterDeadMotion,
+      cubeToPen,
+      degToRad: (degrees) => degrees * Math.PI / 180,
+      normalizeDegrees: (degrees) => ((degrees % 360) + 360) % 360,
+    }),
   });
 }
 

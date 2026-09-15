@@ -30,8 +30,11 @@ flowchart TD
   STORE[app-storage.js]
   DEAD[app-dead-motion.js]
   CANVAS[app-canvas.js]
+  EXEC[app-command-executor.js]
+  PREVIEW[app-command-preview.js]
   TL[app-simulation-timeline.js]
   PLAYER[app-simulation-player.js]
+  REFLOW[app-command-reflow.js]
   EDITOR[app-command-editor.js]
   RUNNER[app-runner.js]
   APP[app.js\n状態所有・イベント接続]
@@ -44,6 +47,9 @@ flowchart TD
   HTML --> FMT --> APP
   HTML --> STORE --> APP
   HTML --> DEAD --> TL --> APP
+  HTML --> EXEC --> CANVAS
+  EXEC --> PREVIEW --> CANVAS
+  HTML --> REFLOW --> EDITOR
   HTML --> CANVAS --> APP
   HTML --> PLAYER --> APP
   HTML --> EDITOR --> APP
@@ -67,8 +73,11 @@ app-formatters.js
 app-storage.js
 app-dead-motion.js
 app-canvas.js
+app-command-executor.js
+app-command-preview.js
 app-simulation-timeline.js
 app-simulation-player.js
+app-command-reflow.js
 app-command-editor.js
 app-runner.js
 app.js
@@ -108,7 +117,10 @@ flowchart LR
 | `app-canvas.js` | Canvas の view transform、マット/描画線/シミュレーション経路/toio 姿勢/選択線分の描画。 |
 | `app-simulation-timeline.js` | command 列から再生時間軸を作り、Position ID と Motor timing の部分経過状態を計算する。 |
 | `app-simulation-player.js` | requestAnimationFrame による再生、一時停止、step、seek、active command 管理。 |
-| `app-command-editor.js` | toio コマンド一覧の HTML、コマンド編集、override の capture/apply、編集後の dead path reflow。 |
+| `app-command-executor.js` | command の種類ごとの実行結果、cube pose、pen tip、途中経路を計算する共通実行器。 |
+| `app-command-preview.js` | command 実行結果を pen down/up 軌跡、cube path、イベントへ集約するロード時プレビュー。 |
+| `app-command-reflow.js` | UI編集後の dead command の endpoint、pen位置、後続travel開始点を再計算する。 |
+| `app-command-editor.js` | toio コマンド一覧の HTML、コマンド編集、override の capture/apply。再計算は `app-command-reflow.js` に委譲する。 |
 | `app-runner.js` | シミュレーション済み command 列を実機へ順次送る。Position ID retry、Motor timing の packet 分割、停止処理を含む。 |
 | `toio-ble.js` | Web Bluetooth 接続、通知解析、Position ID target、timed motor、左右独立 motor、停止、サウンドのバイト列化。 |
 | `sb3-exporter.js` | Motor timing の command/segment を toio do の SB3 テンプレートへ変換し、ZIP を生成する。 |
@@ -157,7 +169,7 @@ flowchart LR
 2. `plotter-core.js` は点の間引き、平滑化、角の分割、直線補正を行う。形状補正が有効なら、安定した形を line/arc/point primitive として認識する。
 3. `Simulate` で `app.js` の `createSimulation()` が `runMode` を見て planner を選ぶ。
 4. planner は安全領域と toio 本体の範囲を検証し、`simulation` を作る。設定変更や描画変更、モード変更時は simulation を invalid にして再シミュレーションを要求する。
-5. `app-simulation-timeline.js` が command の時間を積み上げ、`app-simulation-player.js` が再生状態を作る。`app-canvas.js` はその状態を描画し、`app-command-editor.js` は command 列を表示する。
+5. `app-simulation-timeline.js` が command の時間を積み上げ、`app-simulation-player.js` が再生状態を作る。途中状態は `app-command-executor.js` が計算し、`app-command-preview.js` と `app-canvas.js` が描画する。`app-command-editor.js` は command 列を表示し、編集後の再計算は `app-command-reflow.js` に委譲する。
 
 ### 4.2 シミュレーション → 実機実行
 
@@ -212,7 +224,7 @@ sequenceDiagram
 - point primitive は pen-down、`wait`、pen-up で点を描く。
 - stroke 間には pen-up travel を挿入する。
 
-`app-dead-motion.js` は wheel speed を実効 mm/s に変換し、differential-drive の位置・角度を積分します。タイムラインと Canvas はこのモデルを使って途中姿勢と経路を表示します。コマンド編集時は `app-command-editor.js` が編集後の endpoint、pen 位置、後続 travel の開始を再計算します。
+`app-dead-motion.js` は wheel speed を実効 mm/s に変換し、differential-drive の位置・角度を積分します。`app-command-executor.js` がこのモデルを command 実行結果として共通利用し、タイムラインとCanvasは同じ結果を表示します。コマンド編集時は `app-command-reflow.js` が編集後の endpoint、pen位置、後続travelの開始を再計算します。
 
 実行時、`app-runner.js` は左右速度を `toio-ble.js` の `timedMotorPair()` へ渡します。1 packet の上限を超える時間は最大 2550ms の複数 packet に分割します。Motor timing は座標通知による実行中補正をしません。
 
@@ -221,7 +233,9 @@ sequenceDiagram
 | 責務 | 主なファイル | 変更時の境界 |
 | --- | --- | --- |
 | geometry | `plotter-core.js`, `app-geometry.js` | 点の整形、直線/円弧/点認識、座標、始点/終点、`penX/penY`、安全領域。 |
-| timing / calibration | `plotter-core.js`, `app-dead-motion.js`, `app-simulation-timeline.js`, `app-command-editor.js` | `durationMs`、速度、wheel base、turn 時間、表示時間。 |
+| timing / calibration | `plotter-core.js`, `app-dead-motion.js`, `app-simulation-timeline.js` | `durationMs`、速度、wheel base、turn 時間、表示時間。 |
+| command execution / preview | `app-command-executor.js`, `app-command-preview.js` | commandからのcube姿勢、pen tip軌跡、途中状態、完了状態。 |
+| command reflow | `app-command-reflow.js` | UI編集後のcommand列の再計算と後続commandの接続。 |
 | execution | `app-runner.js`, `toio-ble.js` | command の順次送信、retry、BLE packet、実行中停止、接続状態。 |
 | UI / orchestration | `index.html`, `app.js`, `app-canvas.js`, `app-command-editor.js`, `app-simulation-player.js` | 入力、表示、イベント、状態の受け渡し。 |
 

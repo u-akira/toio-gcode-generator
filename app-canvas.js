@@ -2,7 +2,6 @@
   "use strict";
 
   function createCanvasRenderer(deps) {
-    const deadMotion = root.ToioPlotterDeadMotion;
     const {
       MAT,
       COLORS,
@@ -28,7 +27,13 @@
       distance,
       degToRad,
       primitivePreviewPoints,
+      commandExecutor,
     } = deps;
+    const commandPreviewBuilder = root.ToioPlotterCommandPreview.createCommandPreviewBuilder({
+      getConfig,
+      cubeToPen,
+      commandExecutor,
+    });
 
     const A3_PREVIEW_WIDTH_MM = 420;
     const A3_PREVIEW_HEIGHT_MM = 297;
@@ -114,7 +119,7 @@
       if (activeStroke) drawStroke(activeStroke.raw, COLORS.drawing, 2.2);
       if (simulation) {
         const animatedCommands = getAnimatedCommands();
-        const deadPreview = isDeadMode() ? buildDeadCommandPreview(animatedCommands) : null;
+        const deadPreview = isDeadMode() ? commandPreviewBuilder.buildDeadCommandPreview(animatedCommands) : null;
         const simulationAnimation = getSimulationAnimation();
         if (deadPreview) {
           drawCubePath(deadPreview.cubePath);
@@ -348,218 +353,6 @@
 
     function drawCommandPreviewPenDown(preview) {
       for (const segment of preview.penDownSegments) drawStroke(segment, COLORS.penSimulation, 3.2);
-    }
-
-    function buildDeadCommandPreview(commands) {
-      const config = getConfig();
-      const state = {
-        penDownSegments: [],
-        penUpSegments: [],
-        events: [],
-        waitPoints: [],
-        cubePath: [],
-        segmentPenPaths: new Map(),
-        currentCube: null,
-        currentPen: null,
-        currentTheta: null,
-        penState: "up",
-        downPoints: [],
-        upPoints: [],
-      };
-
-      const commandList = commands || [];
-      for (let commandIndex = 0; commandIndex < commandList.length; commandIndex += 1) {
-        const command = commandList[commandIndex];
-        if (command.type === "pen") {
-          const nextDraw = command.state === "down"
-            ? commandList.slice(commandIndex + 1).find((candidate) => candidate.type === "motor" && candidate.kind === "draw" && Array.isArray(candidate.penPreviewPoints))
-            : null;
-          const eventPoint = nextDraw?.penPreviewPoints?.[0]
-            ? { ...nextDraw.penPreviewPoints[0] }
-            : commandPointOrCurrentPen(command, state);
-          flushPenPreviewSegment(state, state.penState === "down");
-          if (eventPoint) {
-            state.events.push({ ...eventPoint, state: command.state });
-            state.currentPen = eventPoint;
-          }
-          if (command.state === "down") state.downPoints = eventPoint ? [eventPoint] : [];
-          if (command.state === "up") state.upPoints = eventPoint ? [eventPoint] : [];
-          state.penState = command.state;
-          continue;
-        }
-
-        if (command.type === "turn") {
-          replayTurnCommand(command, state, config);
-          continue;
-        }
-
-        if (command.type === "motor") {
-          replayMotorCommand(command, state, config);
-          continue;
-        }
-
-        if (command.type === "wait") {
-          replayWaitCommand(command, state);
-          continue;
-        }
-
-        if (command.type === "move" || command.type === "rotate") {
-          replayPositionCommand(command, state);
-        }
-      }
-
-      flushPenPreviewSegment(state, state.penState === "down");
-      return {
-        penDownSegments: state.penDownSegments,
-        penUpSegments: state.penUpSegments,
-        events: state.events,
-        waitPoints: state.waitPoints,
-        cubePath: state.cubePath,
-        segmentPenPaths: state.segmentPenPaths,
-        finalPenPoint: state.currentPen,
-        finalCubePose: state.currentCube && { ...state.currentCube, theta: state.currentTheta || 0 },
-        penState: state.penState,
-      };
-    }
-
-    function commandPointOrCurrentPen(command, state) {
-      if (command.penX != null && command.penY != null) return { x: command.penX, y: command.penY };
-      if (state.currentPen) return { ...state.currentPen };
-      return null;
-    }
-
-    function flushPenPreviewSegment(state, down) {
-      if (down && state.downPoints.length > 1) state.penDownSegments.push(state.downPoints);
-      if (!down && state.upPoints.length > 1) state.penUpSegments.push(state.upPoints);
-      if (down) state.downPoints = [];
-      if (!down) state.upPoints = [];
-    }
-
-    function replayWaitCommand(command, state) {
-      const point = commandPointOrCurrentPen(command, state);
-      if (!point) return;
-      state.currentPen = point;
-      if (state.penState === "down") state.waitPoints.push(point);
-    }
-
-    function replayTurnCommand(command, state, config) {
-      if (Array.isArray(command.cubePreviewPoints) && Array.isArray(command.penPreviewPoints)) {
-        replayPreviewPointArrays(command, state);
-        return;
-      }
-      const theta = command.theta ?? state.currentTheta ?? 0;
-      if (!state.currentCube && command.x != null && command.y != null) {
-        state.currentCube = { x: command.x, y: command.y };
-      }
-      if (!state.currentCube) {
-        state.currentTheta = theta;
-        return;
-      }
-      state.currentTheta = theta;
-      const cubePose = { ...state.currentCube, theta };
-      state.cubePath.push(cubePose);
-      const penPoint = cubeToPen(state.currentCube, theta, config);
-      if (state.penState === "down") {
-        appendPenPreviewPoint(state, penPoint, command.segmentId);
-      } else {
-        resetPenPreviewAnchor(state, penPoint);
-      }
-      state.currentPen = penPoint;
-    }
-
-    function replayMotorCommand(command, state, config) {
-      if (Array.isArray(command.cubePreviewPoints) && Array.isArray(command.penPreviewPoints)) {
-        replayPreviewPointArrays(command, state);
-        return;
-      }
-
-      const theta = command.theta ?? state.currentTheta ?? 0;
-      const chainedCommand = command.kind === "travel" || command.motionModel === "differential-drive";
-      const startCube =
-        (chainedCommand ? state.currentCube : null) ||
-        finitePoint(command.fromX, command.fromY) ||
-        state.currentCube ||
-        (state.currentPen ? penToCube(state.currentPen, theta, config) : null) ||
-        finitePoint(command.x, command.y);
-      if (!startCube) return;
-      const progress = Number.isFinite(command.previewProgress) ? Math.max(0, Math.min(1, command.previewProgress)) : 1;
-      const targetCube = finitePoint(command.x, command.y);
-      const endCube = targetCube
-        ? {
-            x: startCube.x + (targetCube.x - startCube.x) * progress,
-            y: startCube.y + (targetCube.y - startCube.y) * progress,
-          }
-        : {
-            x: startCube.x + Math.cos(degToRad(theta)) * deadMotion.deadLineMotionDistanceMm(command, config) * progress,
-            y: startCube.y + Math.sin(degToRad(theta)) * deadMotion.deadLineMotionDistanceMm(command, config) * progress,
-          };
-      const startPose = { ...startCube, theta: command.startTheta ?? state.currentTheta ?? theta };
-      const endPose = { ...endCube, theta };
-      appendCubePreviewPoint(state, startPose);
-      appendCubePreviewPoint(state, endPose);
-
-      const startPen = cubeToPen(startCube, startPose.theta, config);
-      const endPen = cubeToPen(endCube, theta, config);
-      appendPenPreviewPoint(state, startPen, command.segmentId);
-      appendPenPreviewPoint(state, endPen, command.segmentId);
-      state.currentCube = endCube;
-      state.currentTheta = theta;
-      state.currentPen = endPen;
-    }
-
-    function replayPreviewPointArrays(command, state) {
-      for (const point of command.cubePreviewPoints) appendCubePreviewPoint(state, point);
-      for (const point of command.penPreviewPoints) appendPenPreviewPoint(state, point, command.segmentId);
-      const lastCube = command.cubePreviewPoints[command.cubePreviewPoints.length - 1];
-      const lastPen = command.penPreviewPoints[command.penPreviewPoints.length - 1];
-      if (lastCube) {
-        state.currentCube = { x: lastCube.x, y: lastCube.y };
-        state.currentTheta = lastCube.theta ?? command.theta ?? state.currentTheta;
-      }
-      if (lastPen) state.currentPen = { x: lastPen.x, y: lastPen.y };
-    }
-
-    function replayPositionCommand(command, state) {
-      if (command.x != null && command.y != null) {
-        appendCubePreviewPoint(state, { x: command.x, y: command.y, theta: command.theta || 0 });
-        state.currentCube = { x: command.x, y: command.y };
-        state.currentTheta = command.theta ?? state.currentTheta;
-      }
-      if (command.penX != null && command.penY != null) {
-        const point = { x: command.penX, y: command.penY };
-        appendPenPreviewPoint(state, point, command.segmentId);
-        state.currentPen = point;
-      }
-    }
-
-    function appendCubePreviewPoint(state, point) {
-      const previous = state.cubePath[state.cubePath.length - 1];
-      if (previous && Math.hypot(previous.x - point.x, previous.y - point.y) < 0.01 && Math.abs((previous.theta || 0) - (point.theta || 0)) < 0.01) return;
-      state.cubePath.push(point);
-    }
-
-    function appendPenPreviewPoint(state, point, segmentId) {
-      const target = state.penState === "down" ? state.downPoints : state.upPoints;
-      const previous = target[target.length - 1];
-      if (!previous || Math.hypot(previous.x - point.x, previous.y - point.y) >= 0.01) target.push(point);
-      if (segmentId && state.penState === "down") {
-        const segmentPath = state.segmentPenPaths.get(segmentId) || [];
-        const lastSegmentPoint = segmentPath[segmentPath.length - 1];
-        if (!lastSegmentPoint || Math.hypot(lastSegmentPoint.x - point.x, lastSegmentPoint.y - point.y) >= 0.01) segmentPath.push(point);
-        state.segmentPenPaths.set(segmentId, segmentPath);
-      }
-    }
-
-    function resetPenPreviewAnchor(state, point) {
-      if (state.penState === "down") {
-        state.downPoints = [point];
-      } else {
-        state.upPoints = [point];
-      }
-    }
-
-    function finitePoint(x, y) {
-      return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
     }
 
     function drawCubePath(points) {
@@ -864,7 +657,7 @@
       };
       const threshold = 10 * dpr;
       let best = null;
-      const deadPreview = buildDeadCommandPreview(getAnimatedCommands());
+      const deadPreview = commandPreviewBuilder.buildDeadCommandPreview(getAnimatedCommands());
       for (const segment of getDeadSegments()) {
         const d = distanceToCanvasSegmentPath(point, segmentPenPoints(segment, deadPreview).map(matToCanvas));
         if (d <= threshold && (!best || d < best.distance)) best = { segment, distance: d };
@@ -897,7 +690,7 @@
       draw,
       findClickedDrawSegment,
       __test: {
-        buildDeadCommandPreview,
+        buildDeadCommandPreview: (...args) => commandPreviewBuilder.buildDeadCommandPreview(...args),
       },
     };
   }

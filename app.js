@@ -155,6 +155,14 @@ playMatImage.onerror = () => {
   draw();
 };
 
+const commandExecutor = window.ToioPlotterCommandExecutor.createCommandExecutor({
+  cubeToPen,
+  clamp,
+  normalizeDegrees,
+  signedAngleDelta: window.PlotterCore.signedAngleDelta,
+  deadMotion: window.ToioPlotterDeadMotion,
+});
+
 const canvasRenderer = window.ToioPlotterCanvas.createCanvasRenderer({
   MAT,
   COLORS,
@@ -180,19 +188,17 @@ const canvasRenderer = window.ToioPlotterCanvas.createCanvasRenderer({
   distance,
   degToRad,
   primitivePreviewPoints: window.PlotterCore.primitivePreviewPoints,
+  commandExecutor,
 });
 
 const simulationTimelineTools = window.ToioPlotterTimeline.createSimulationTimelineTools({
   getSimulation: () => simulation,
   getConfig: () => config,
-  cubeToPen,
   clamp,
   distance,
   normalizeDegrees,
-  signedAngleDelta: window.PlotterCore.signedAngleDelta,
-  pointOnCircle: window.PlotterCore.pointOnCircle,
-  deadMotion: window.ToioPlotterDeadMotion,
   minTurnDurationMs: MIN_TURN_DURATION_MS,
+  commandExecutor,
 });
 
 const simulationPlayback = window.ToioPlotterSimulationPlayer.createSimulationPlaybackController({
@@ -239,15 +245,22 @@ const commandEditor = window.ToioPlotterCommandEditor.createCommandEditor({
   turnWheelSpeeds,
   computeArcWheelSpeedsForDuration: window.PlotterCore.computeArcWheelSpeedsForDuration,
   turnMsPer90,
-  penToCube: window.PlotterCore.penToCube,
   cubeToPen,
-  degToRad,
   normalizeDegrees,
   syncSimulationControls,
   syncRunButton,
   focusCommand: (index, options) => simulationPlayback.focusCommand(index, options),
   getActiveCommandIndex: () => simulationPlayback.getActiveCommandIndex(),
   draw,
+  commandReflow: window.ToioPlotterCommandReflow.createCommandReflow({
+    getSimulation: () => simulation,
+    getConfig: () => config,
+    isDeadMode,
+    deadMotion: window.ToioPlotterDeadMotion,
+    cubeToPen,
+    degToRad,
+    normalizeDegrees,
+  }),
 });
 
 const toioRunner = window.ToioPlotterRunner.createToioRunner({
