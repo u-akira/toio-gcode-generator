@@ -19,7 +19,6 @@
       let currentPen = null;
       let currentCube = null;
       let currentTheta = null;
-      let preserveTravelTargets = false;
       for (const command of simulation.commands) {
         if (command.type === "pen") {
           if (currentPen && command.penX != null) {
@@ -66,14 +65,26 @@
         }
         if (command.type !== "motor") continue;
         if (command.turnInPlace && command.geometry === "arc" && command.center && command.sweepAngle != null) {
+          const startCube = currentCube || { x: command.center.x, y: command.center.y };
           const startTheta = currentTheta ?? command.startTheta ?? command.theta ?? 0;
-          command.fromX = command.center.x;
-          command.fromY = command.center.y;
-          command.x = command.center.x;
-          command.y = command.center.y;
+          const sweepAngle = Number(command.sweepAngle) || 0;
+          const previewCount = Math.max(1, Math.ceil(Math.abs(sweepAngle) / 5));
+          command.center = { x: startCube.x, y: startCube.y };
+          command.fromX = startCube.x;
+          command.fromY = startCube.y;
+          command.x = startCube.x;
+          command.y = startCube.y;
           command.startTheta = startTheta;
-          command.theta = normalizeDegrees(startTheta + command.sweepAngle);
-          currentCube = { x: command.center.x, y: command.center.y };
+          command.theta = normalizeDegrees(startTheta + sweepAngle);
+          command.cubePreviewPoints = [];
+          command.penPreviewPoints = [];
+          for (let index = 0; index <= previewCount; index += 1) {
+            const theta = normalizeDegrees(startTheta + sweepAngle * index / previewCount);
+            const cubePoint = { x: startCube.x, y: startCube.y, theta };
+            command.cubePreviewPoints.push(cubePoint);
+            command.penPreviewPoints.push(cubeToPen(cubePoint, theta, config));
+          }
+          currentCube = { x: startCube.x, y: startCube.y };
           currentTheta = command.theta;
           currentPen = cubeToPen(currentCube, currentTheta, config);
           command.penX = currentPen.x;
@@ -81,14 +92,22 @@
           continue;
         }
         if (command.geometry === "arc" || command.motionModel === "differential-drive") {
-          preserveTravelTargets = preserveTravelTargets || command.geometry === "arc";
           const start = currentCube || { x: command.fromX, y: command.fromY };
           if (!start || start.x == null || start.y == null) continue;
           const startTheta = currentTheta ?? command.startTheta ?? command.theta ?? 0;
           const result = deadMotion.integrateDifferentialDrive(start, startTheta, command.leftSpeed, command.rightSpeed, command.durationMs, command, config);
           const points = deadMotion.differentialPreviewPoints(start, startTheta, command.leftSpeed, command.rightSpeed, command.durationMs, command, config);
           const deltaTheta = signedThetaDelta(startTheta, result.theta);
-          const geometry = Math.abs(result.angularRadPerSec) < 1e-9 ? "line" : "arc";
+          // PlotterCore's public integrator intentionally returns only a pose.
+          // Reflow still needs the wheel rates to rebuild the command geometry,
+          // so derive them from the edited command rather than reading optional
+          // metadata from the pose result.
+          const leftMmPerSec = deadMotion.deadWheelMmPerSec(command.leftSpeed, command, config);
+          const rightMmPerSec = deadMotion.deadWheelMmPerSec(command.rightSpeed, command, config);
+          const angularRadPerSec = (leftMmPerSec - rightMmPerSec)
+            / Math.max(1, Number(config.deadWheelBaseMm) || 26);
+          const averageMmPerSec = (leftMmPerSec + rightMmPerSec) / 2;
+          const geometry = Math.abs(angularRadPerSec) < 1e-9 ? "line" : "arc";
           command.motionModel = "differential-drive";
           command.fromX = start.x;
           command.fromY = start.y;
@@ -97,7 +116,7 @@
           command.y = result.y;
           command.theta = normalizeDegrees(result.theta);
           command.geometry = geometry;
-          if (geometry === "arc" && Math.abs((result.leftMmPerSec + result.rightMmPerSec) / 2) < 1e-9) {
+          if (geometry === "arc" && Math.abs(averageMmPerSec) < 1e-9) {
             command.type = "turn";
             delete command.geometry;
           } else {
@@ -106,7 +125,7 @@
           command.penPreviewPoints = points.map((point) => cubeToPen(point, point.theta, config));
           command.cubePreviewPoints = points.map((point) => ({ x: point.x, y: point.y, theta: normalizeDegrees(point.theta) }));
           if (geometry === "arc") {
-            const signedRadius = (result.leftMmPerSec + result.rightMmPerSec) / 2 / result.angularRadPerSec;
+            const signedRadius = averageMmPerSec / angularRadPerSec;
             command.radius = Math.abs(signedRadius);
             command.sweepAngle = deltaTheta;
             command.center = {
@@ -131,12 +150,10 @@
         if (!startCube || startCube.x == null || startCube.y == null) continue;
         const theta = currentTheta ?? command.startTheta ?? command.theta ?? 0;
         const distanceMm = deadMotion.deadLineMotionDistanceMm(command, config);
-        const endCube = preserveTravelTargets && command.kind === "travel" && command.x != null && command.y != null
-          ? { x: command.x, y: command.y }
-          : {
-              x: startCube.x + Math.cos(degToRad(theta)) * distanceMm,
-              y: startCube.y + Math.sin(degToRad(theta)) * distanceMm,
-            };
+        const endCube = {
+          x: startCube.x + Math.cos(degToRad(theta)) * distanceMm,
+          y: startCube.y + Math.sin(degToRad(theta)) * distanceMm,
+        };
         command.fromX = startCube.x;
         command.fromY = startCube.y;
         command.x = endCube.x;

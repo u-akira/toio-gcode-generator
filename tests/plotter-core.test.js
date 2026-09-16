@@ -626,6 +626,13 @@ test("keroppi outline sample draws tight outer eyes and side outline arcs slowly
   assert.equal(leftOuterEye.center.x + rightOuterEye.center.x, 500);
   assert.equal(leftOuterEye.radius, rightOuterEye.radius);
   assert.ok(Math.max(...leftOuterEye.penPreviewPoints.map((point) => point.x)) < Math.min(...rightOuterEye.penPreviewPoints.map((point) => point.x)));
+  const eyeContactX = (Math.max(...leftOuterEye.penPreviewPoints.map((point) => point.x))
+    + Math.min(...rightOuterEye.penPreviewPoints.map((point) => point.x))) / 2;
+  const mouthCommandCenterX = (mouth.penPreviewPoints[0].x + mouth.penPreviewPoints.at(-1).x) / 2;
+  assert.ok(
+    Math.abs(mouthCommandCenterX - eyeContactX) < 0.2,
+    `command-derived eye contact moved from mouth center: ${eyeContactX} !== ${mouthCommandCenterX}`,
+  );
   assert.equal(leftOutline.startHeading + rightOutline.startHeading, 180);
   assert.ok(Math.abs(leftOutline.start.x + rightOutline.start.x - 534.184073) < 0.1);
   assert.ok(Math.abs(leftOutline.start.y - rightOutline.start.y) < 0.1);

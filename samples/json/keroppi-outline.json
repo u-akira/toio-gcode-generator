@@ -5,9 +5,9 @@
   "deadSegmentSettings": {
     "seg-0": { "speed": 12, "durationScale": 1 },
     "seg-1": { "speed": 12, "durationScale": 1 },
-    "seg-2": { "speed": 12, "durationScale": 1 },
+    "seg-2": { "speed": 14.2, "durationScale": 1 },
     "seg-3": { "speed": 12, "durationScale": 1 },
-    "seg-4": { "speed": 12, "durationScale": 1 },
+    "seg-4": { "speed": 14.2, "durationScale": 1 },
     "seg-5": { "speed": 12, "durationScale": 1 },
     "seg-6": { "speed": 12, "durationScale": 1 },
     "seg-7": { "speed": 12, "durationScale": 1 },
@@ -42,7 +42,8 @@
           "center": { "x": 215, "y": 218 },
           "radius": 25,
           "startAngle": 294.089506,
-          "sweepAngle": 360
+          "sweepAngle": 360,
+          "startHeading": 24.089506
         }
       ],
       "raw": [
@@ -58,7 +59,8 @@
           "center": { "x": 285, "y": 218 },
           "radius": 25,
           "startAngle": 294.089506,
-          "sweepAngle": 360
+          "sweepAngle": 360,
+          "startHeading": 24.089506
         }
       ],
       "raw": [

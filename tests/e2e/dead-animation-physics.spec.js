@@ -398,6 +398,260 @@ test("wave L/R edit followed immediately by Simulate keeps the edited drawing", 
   }
 });
 
+test("editing wave command 3 duration keeps its animated pen-down path", async ({ page }) => {
+  await page.goto("/");
+  await page.selectOption("#sampleSelect", "samples/json/wave.json");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const duration = page.locator('input[data-command-index="2"][data-command-key="durationMs"]');
+  await duration.fill("1000");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const result = await page.evaluate(() => {
+    const commands = window.__toioTest.getCommands();
+    const timeline = window.__toioTest.getAnimationSnapshot();
+    const item = timeline.items.find((candidate) => candidate.commandIndex === 2);
+    window.__toioTest.seekAnimation(item.startMs + (item.endMs - item.startMs) / 2);
+    const midSnapshot = window.__toioTest.getAnimationSnapshot();
+    const midPreview = window.__toioTest.getDeadPreview();
+    const path = midPreview.segmentPenPaths.find(([segmentId]) => segmentId === commands[2].segmentId)?.[1];
+    return {
+      command: commands[2],
+      item,
+      active: midSnapshot.activeCommandIndex,
+      path,
+      start: path?.[0],
+      end: path?.at(-1),
+      pen: midSnapshot.commands[2]?.penX != null
+        ? { x: midSnapshot.commands[2].penX, y: midSnapshot.commands[2].penY }
+        : null,
+    };
+  });
+
+  expect(result.command.durationMs).toBe(1000);
+  expect(result.item).toBeDefined();
+  expect(result.active).toBe(2);
+  expect(result.path?.length).toBeGreaterThan(2);
+  expect(Math.hypot(result.end.x - result.start.x, result.end.y - result.start.y)).toBeGreaterThan(0.1);
+  expect(Math.hypot(result.end.x - result.pen.x, result.end.y - result.pen.y)).toBeLessThan(0.1);
+});
+
+test("editing wave command 3 recalculates command 6 and 7 from the edited pose", async ({ page }) => {
+  const loadCommands = async (editCommand3) => {
+    await page.goto("/");
+    await page.selectOption("#sampleSelect", "samples/json/wave.json");
+    await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+    if (editCommand3) {
+      await page.locator('input[data-command-index="2"][data-command-key="durationMs"]').fill("1000");
+    }
+    await page.click("#simulateBtn");
+    await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+    return page.evaluate(() => window.__toioTest.getCommands().map((command) => ({
+      type: command.type,
+      kind: command.kind,
+      speed: command.speed,
+      durationMs: command.durationMs,
+      fromX: command.fromX,
+      fromY: command.fromY,
+      x: command.x,
+      y: command.y,
+    })));
+  };
+
+  const unedited = await loadCommands(false);
+  const edited = await loadCommands(true);
+  const unedited6 = unedited[5];
+  const unedited7 = unedited[6];
+  const edited5 = edited[4];
+  const edited6 = edited[5];
+  const edited7 = edited[6];
+
+  expect(edited[2].durationMs).toBe(1000);
+  expect(edited6.fromX).toBeCloseTo(edited5.x, 3);
+  expect(edited6.fromY).toBeCloseTo(edited5.y, 3);
+  expect(edited7.x).toBeCloseTo(edited6.x, 3);
+  expect(edited7.y).toBeCloseTo(edited6.y, 3);
+  expect(Math.hypot(edited6.x - unedited6.x, edited6.y - unedited6.y)).toBeGreaterThan(1);
+  expect(Math.hypot(edited6.x - 260, edited6.y - 230)).toBeGreaterThan(1);
+  expect(Math.hypot(edited7.x - unedited7.x, edited7.y - unedited7.y)).toBeGreaterThan(1);
+});
+
+test("edited wave simulation follows every generated command movement", async ({ page }) => {
+  await page.goto("/");
+  await page.selectOption("#sampleSelect", "samples/json/wave.json");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  await page.locator('input[data-command-index="2"][data-command-key="durationMs"]').fill("1000");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const result = await page.evaluate(() => {
+    const initial = window.__toioTest.getAnimationSnapshot();
+    const commands = window.__toioTest.getCommands();
+    const itemIndexes = initial.items.map((item) => item.commandIndex);
+    const frames = initial.items.map((item) => {
+      const times = [item.startMs + 0.001, item.startMs + (item.endMs - item.startMs) / 2, Math.max(item.startMs + 0.001, item.endMs - 0.001)];
+      return {
+        item,
+        frames: times.map((time) => {
+          window.__toioTest.seekAnimation(time);
+          const snapshot = window.__toioTest.getAnimationSnapshot();
+          const preview = window.__toioTest.getDeadPreview();
+          const command = snapshot.commands[item.commandIndex];
+          const path = command.segmentId
+            ? preview.segmentPenPaths.find(([segmentId]) => segmentId === command.segmentId)?.[1] || null
+            : null;
+          return {
+            command,
+            activeCommandIndex: snapshot.activeCommandIndex,
+            path,
+            penDownSegments: preview.penDownSegments.length,
+          };
+        }),
+      };
+    });
+    return {
+      itemIndexes,
+      durations: initial.items.map((item) => item.durationMs),
+      commands: commands.map((command) => ({
+        type: command.type,
+        kind: command.kind || null,
+        geometry: command.geometry || null,
+        segmentId: command.segmentId || null,
+      })),
+      frames,
+    };
+  });
+
+  expect(result.itemIndexes).toEqual([2, 4, 5, 6, 7, 8, 10]);
+  expect(result.durations).toEqual([1000, 1110, 230, 310, 150, 890, 2680]);
+  expect(result.commands.slice(0, 12).map((command) => command.type)).toEqual([
+    "pen", "pen", "motor", "pen", "turn", "motor", "turn", "motor", "turn", "pen", "motor", "pen",
+  ]);
+
+  for (let index = 0; index < result.frames.length; index += 1) {
+    const { item, frames } = result.frames[index];
+    const [start, middle, end] = frames;
+    expect(start.activeCommandIndex).toBe(item.commandIndex);
+    expect(middle.activeCommandIndex).toBe(item.commandIndex);
+    expect(end.activeCommandIndex).toBe(item.commandIndex);
+    expect(start.command).toBeDefined();
+    expect(middle.command).toBeDefined();
+    expect(end.command).toBeDefined();
+    expect(start.command.x).toBeDefined();
+    expect(start.command.y).toBeDefined();
+    expect(end.command.x).toBeDefined();
+    expect(end.command.y).toBeDefined();
+
+    if (item.commandIndex === 6) {
+      expect(Math.hypot(end.command.x - start.command.x, end.command.y - start.command.y)).toBeLessThan(0.1);
+      expect(Math.abs(end.command.theta - start.command.theta)).toBeGreaterThan(1);
+      expect(end.path).toBeNull();
+      continue;
+    }
+
+    if (result.commands[item.commandIndex].kind === "draw") {
+      expect(start.path?.length).toBeGreaterThanOrEqual(1);
+      expect(middle.path?.length).toBeGreaterThan(1);
+      expect(end.path?.length).toBeGreaterThan(1);
+      expect(Math.hypot(end.path.at(-1).x - end.command.penX, end.path.at(-1).y - end.command.penY)).toBeLessThan(0.1);
+      continue;
+    }
+
+    if (result.commands[item.commandIndex].kind === "travel") {
+      expect(end.path).toBeNull();
+      expect(Math.hypot(end.command.x - start.command.x, end.command.y - start.command.y)).toBeGreaterThan(0.1);
+    }
+  }
+
+  for (let index = 1; index < result.frames.length; index += 1) {
+    const previousEnd = result.frames[index - 1].frames[2].command;
+    const currentStart = result.frames[index].frames[0].command;
+    expect(Math.hypot(currentStart.x - previousEnd.x, currentStart.y - previousEnd.y)).toBeLessThan(0.1);
+  }
+});
+
+test("actual wave playback does not translate the cube when crossing command 6 to 7", async ({ page }) => {
+  await page.goto("/");
+  await page.selectOption("#sampleSelect", "samples/json/wave.json");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  await page.locator('input[data-command-index="2"][data-command-key="durationMs"]').fill("1000");
+  await page.click("#simulateBtn");
+
+  const result = await page.evaluate(async () => {
+    const samples = [];
+    const commands = window.__toioTest.getCommands();
+    const deadline = performance.now() + 3200;
+    while (performance.now() < deadline) {
+      const snapshot = window.__toioTest.getAnimationSnapshot();
+      if (snapshot?.activeCommandIndex === 5 || snapshot?.activeCommandIndex === 6) {
+        const command = snapshot.commands[snapshot.activeCommandIndex];
+        samples.push({
+          commandIndex: snapshot.activeCommandIndex,
+          x: command?.x,
+          y: command?.y,
+          theta: command?.theta,
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 16));
+    }
+    const previous = commands[5];
+    const turns = samples.filter((sample) => sample.commandIndex === 6);
+    return { previous, turns };
+  });
+
+  expect(result.previous).toBeDefined();
+  expect(result.turns.length).toBeGreaterThan(1);
+  for (const turn of result.turns) {
+    expect(Math.hypot(turn.x - result.previous.x, turn.y - result.previous.y), JSON.stringify({ previous: result.previous, turn })).toBeLessThan(0.1);
+  }
+});
+
+test("rendered wave playback keeps the simulated toio in place at command 6 to 7 boundary", async ({ page }) => {
+  await page.goto("/");
+  await page.selectOption("#sampleSelect", "samples/json/wave.json");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  await page.locator('input[data-command-index="2"][data-command-key="durationMs"]').fill("1000");
+  await page.click("#simulateBtn");
+  await page.click("#simPauseBtn");
+  await page.evaluate(() => window.__toioTest.seekAnimation(0));
+
+  const turnStartMs = await page.evaluate(() => window.__toioTest.getAnimationSnapshot().items.find((item) => item.commandIndex === 6).startMs);
+  const readRedCenter = () => page.evaluate(() => {
+    const canvas = document.querySelector("#plotCanvas");
+    const image = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+    const points = [];
+    for (let y = 0; y < image.height; y += 1) {
+      for (let x = 0; x < image.width; x += 1) {
+        const offset = (y * image.width + x) * 4;
+        if (image.data[offset] > 120 && image.data[offset + 1] < 100 && image.data[offset + 2] < 100 && image.data[offset + 3] > 200) points.push({ x, y });
+      }
+    }
+    return points.reduce((center, point) => ({ x: center.x + point.x, y: center.y + point.y, count: center.count + 1 }), { x: 0, y: 0, count: 0 });
+  });
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), turnStartMs - 0.001);
+  const command6Red = await readRedCenter();
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), turnStartMs + 0.001);
+  const command7Red = await readRedCenter();
+
+  const result = await page.evaluate(() => {
+    const commands = window.__toioTest.getCommands();
+    const snapshot = window.__toioTest.getAnimationSnapshot();
+    const preview = window.__toioTest.getDeadPreview();
+    return {
+      active: snapshot.activeCommandIndex,
+      expected: commands[5],
+      pose: preview.cubePath.at(-1),
+    };
+  });
+
+  expect(result.active).toBe(6);
+  expect(command6Red.count).toBeGreaterThan(0);
+  expect(command7Red.count).toBeGreaterThan(0);
+  expect(Math.hypot(command7Red.x / command7Red.count - command6Red.x / command6Red.count, command7Red.y / command7Red.count - command6Red.y / command6Red.count)).toBeLessThan(4);
+  expect(Math.hypot(result.pose.x - result.expected.x, result.pose.y - result.expected.y)).toBeLessThan(0.1);
+});
+
 test("completed animation keeps the command-executed drawing instead of reload preview", async ({ page }) => {
   await page.goto("/");
   await page.locator("#importInput").setInputFiles("data/wave-copy-paper.json");
@@ -677,6 +931,7 @@ test("edited keroppi arc stays near its loaded endpoint", async ({ page }) => {
   await page.selectOption("#sampleSelect", "samples/json/keroppi-outline.json");
   await page.click("#simulateBtn");
   await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  await page.click("#simPauseBtn");
 
   const loadedTimeline = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
   await page.evaluate((time) => window.__toioTest.seekAnimation(time), loadedTimeline.durationMs);
@@ -719,7 +974,7 @@ test("edited keroppi arc stays near its loaded endpoint", async ({ page }) => {
   expect(Math.hypot(restoredArc.x - loadedArc.x, restoredArc.y - loadedArc.y)).toBeLessThan(0.1);
 });
 
-test("a 100ms keroppi arc edit keeps the drawing path stable", async ({ page }) => {
+test("a 100ms keroppi arc edit reflows downstream commands from the edited pose", async ({ page }) => {
   await page.goto("/");
   await page.selectOption("#sampleSelect", "samples/json/keroppi-outline.json");
   await page.click("#simulateBtn");
@@ -728,10 +983,10 @@ test("a 100ms keroppi arc edit keeps the drawing path stable", async ({ page }) 
   const initial = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
   await page.evaluate((time) => window.__toioTest.seekAnimation(time), initial.durationMs);
   const baseline = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
-  const baselineArcs = baseline.commands.filter((command) => command.type === "motor" && command.kind === "draw" && command.geometry === "arc" && !["seg-2", "seg-4", "seg-10", "seg-12"].includes(command.segmentId));
-  expect(baselineArcs.length).toBeGreaterThanOrEqual(3);
-
-  const editedArc = baselineArcs.find((command) => command.segmentId === "seg-0");
+  const editedArc = baseline.commands.find((command) => command.segmentId === "seg-0");
+  const baselineTravel = baseline.commands.find((command) => command.segmentId === "seg-1" && command.kind === "travel");
+  expect(editedArc).toBeDefined();
+  expect(baselineTravel).toBeDefined();
   const editedIndex = baseline.commands.indexOf(editedArc);
   const duration = page.locator(`input[data-command-index="${editedIndex}"][data-command-key="durationMs"]`);
   await duration.fill(String(editedArc.durationMs + 100));
@@ -742,21 +997,24 @@ test("a 100ms keroppi arc edit keeps the drawing path stable", async ({ page }) 
   const editedTimeline = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
   await page.evaluate((time) => window.__toioTest.seekAnimation(time), editedTimeline.durationMs);
   const edited = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
-  const editedArcs = edited.commands.filter((command) => command.type === "motor" && command.kind === "draw" && command.geometry === "arc" && !["seg-2", "seg-4"].includes(command.segmentId));
-  const bySegment = new Map(editedArcs.map((command) => [command.segmentId, command]));
+  const editedArcAfter = edited.commands.find((command) => command.segmentId === "seg-0");
+  const editedTravel = edited.commands.find((command) => command.segmentId === "seg-1" && command.kind === "travel");
+  expect(editedArcAfter).toBeDefined();
+  expect(editedTravel).toBeDefined();
+  expect(Math.hypot(editedArcAfter.x - editedArc.x, editedArcAfter.y - editedArc.y)).toBeGreaterThan(1);
+  expect(editedTravel.fromX).toBeCloseTo(editedArcAfter.x, 6);
+  expect(editedTravel.fromY).toBeCloseTo(editedArcAfter.y, 6);
+  expect(Math.hypot(editedTravel.x - baselineTravel.x, editedTravel.y - baselineTravel.y)).toBeGreaterThan(1);
 
-  for (const before of baselineArcs) {
-    const after = bySegment.get(before.segmentId);
-    expect(after, `missing ${before.segmentId} after 100ms edit`).toBeDefined();
-    expect(Math.hypot(after.x - before.x, after.y - before.y), `${before.segmentId} endpoint moved: ${JSON.stringify({ before: [before.x, before.y, before.theta], after: [after.x, after.y, after.theta], beforeFrom: [before.fromX, before.fromY], afterFrom: [after.fromX, after.fromY], beforeSpeed: [before.leftSpeed, before.rightSpeed], afterSpeed: [after.leftSpeed, after.rightSpeed] })}`).toBeLessThan(1);
-    expect(Math.hypot(after.fromX - before.fromX, after.fromY - before.fromY), `${before.segmentId} start moved: ${JSON.stringify({ before: [before.fromX, before.fromY], after: [after.fromX, after.fromY] })}`).toBeLessThan(1);
-    for (let pointIndex = 0; pointIndex < before.penPreviewPoints.length; pointIndex += 1) {
-      const beforePoint = before.penPreviewPoints[pointIndex];
-      const normalized = pointIndex / Math.max(1, before.penPreviewPoints.length - 1);
-      const afterPoint = after.penPreviewPoints[Math.round(normalized * (after.penPreviewPoints.length - 1))];
-      expect(Math.hypot(afterPoint.x - beforePoint.x, afterPoint.y - beforePoint.y), `${before.segmentId} path moved at point ${pointIndex}`).toBeLessThan(5);
-    }
-  }
+  const editedTurnInPlace = edited.commands.find((command) => command.turnInPlace);
+  const precedingTravel = edited.commands
+    .slice(0, edited.commands.indexOf(editedTurnInPlace))
+    .reverse()
+    .find((command) => command.type === "motor" && command.kind === "travel");
+  expect(editedTurnInPlace).toBeDefined();
+  expect(precedingTravel).toBeDefined();
+  expect(editedTurnInPlace.center.x).toBeCloseTo(precedingTravel.x, 6);
+  expect(editedTurnInPlace.center.y).toBeCloseTo(precedingTravel.y, 6);
 });
 
 test("keroppi has no position or heading jump at any command boundary", async ({ page }) => {

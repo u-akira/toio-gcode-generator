@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const core = require("../plotter-core.js");
 
 function loadCommandEditor({
   commands,
@@ -14,8 +15,10 @@ function loadCommandEditor({
   cubeToPen = (point) => point,
   turnWheelSpeeds = () => ({ left: 0, right: 0 }),
   computeArcWheelSpeedsForDuration,
+  plotterCore = null,
 }) {
   const context = { window: {}, Math };
+  if (plotterCore) context.PlotterCore = plotterCore;
   vm.createContext(context);
   const deadMotionSource = fs.readFileSync(path.join(__dirname, "..", "app-dead-motion.js"), "utf8");
   vm.runInContext(deadMotionSource, context);
@@ -233,6 +236,163 @@ test("edited arc motor uses wheel speeds and duration, then reflows following co
   assert.ok(commands[1].y > 0);
   assert.equal(commands[3].fromX, commands[1].x);
   assert.equal(commands[3].fromY, commands[1].y);
+});
+
+test("reflow keeps a following arc finite when the motion integrator returns only its pose", () => {
+  const commands = [
+    { type: "pen", state: "up", penX: 0, penY: 0 },
+    {
+      type: "motor", kind: "draw", geometry: "arc", segmentId: "seg-0",
+      leftSpeed: 8, rightSpeed: 16, durationMs: 1000,
+      fromX: 0, fromY: 0, x: 10, y: 10, theta: 20, startTheta: 0,
+      center: { x: 0, y: 10 }, radius: 10, startAngle: -90, sweepAngle: 90,
+    },
+    { type: "pen", state: "up", penX: 0, penY: 0 },
+    {
+      type: "motor", kind: "draw", geometry: "arc", segmentId: "seg-1",
+      leftSpeed: 22, rightSpeed: 8, durationMs: 4210,
+      fromX: 10, fromY: 10, x: 10, y: 10, theta: 360, startTheta: 0,
+      center: { x: 10, y: 35 }, radius: 25, startAngle: -90, sweepAngle: 360,
+    },
+  ];
+  const editor = loadCommandEditor({
+    commands,
+    overrides: new Map(),
+    plotterCore: {
+      integrateDifferentialDrive: core.integrateDifferentialDrive,
+      differentialPreviewPoints: core.differentialPreviewPoints,
+    },
+    getConfig: () => core.withDefaults({
+      drawSpeed: 20,
+      travelSpeed: 20,
+      deadArcMmPerSecAtDrawSpeed: 55.43,
+      deadMmPerSecAtTravelSpeed: 70,
+      deadWheelBaseMm: 26,
+      penOffsetX: -20,
+      penOffsetY: 0,
+    }),
+  });
+
+  editor.reflowDeadLineCommandPath();
+
+  for (const command of [commands[1], commands[3]]) {
+    assert.ok(Number.isFinite(command.center?.x), `invalid center: ${JSON.stringify(command)}`);
+    assert.ok(Number.isFinite(command.center?.y), `invalid center: ${JSON.stringify(command)}`);
+    assert.ok(Number.isFinite(command.startAngle), `invalid start angle: ${JSON.stringify(command)}`);
+    assert.ok(command.penPreviewPoints.length > 2);
+  }
+});
+
+test("reflow recomputes travel after an edited arc instead of restoring its old target", () => {
+  const commands = [
+    { type: "pen", state: "down", penX: 0, penY: 0 },
+    {
+      type: "motor", kind: "draw", geometry: "arc", segmentId: "seg-0",
+      leftSpeed: 8, rightSpeed: 16, durationMs: 1000,
+      fromX: 0, fromY: 0, x: 10, y: 10, theta: 20, startTheta: 0,
+      center: { x: 0, y: 10 }, radius: 10, startAngle: -90, sweepAngle: 90,
+    },
+    { type: "pen", state: "up", penX: 10, penY: 10 },
+    {
+      type: "motor", kind: "travel", geometry: "line", segmentId: "seg-1",
+      speed: 20, durationMs: 1000,
+      fromX: 10, fromY: 10, x: 260, y: 230, theta: 90,
+    },
+    {
+      type: "turn", role: "turn-to-draw", segmentId: "seg-1",
+      angle: -90, x: 260, y: 230, theta: 0,
+    },
+  ];
+  const editor = loadCommandEditor({
+    commands,
+    overrides: new Map(),
+    plotterCore: {
+      integrateDifferentialDrive: core.integrateDifferentialDrive,
+      differentialPreviewPoints: core.differentialPreviewPoints,
+    },
+    getConfig: () => core.withDefaults({
+      drawSpeed: 20,
+      travelSpeed: 20,
+      deadArcMmPerSecAtDrawSpeed: 55.43,
+      deadMmPerSecAtTravelSpeed: 70,
+      deadWheelBaseMm: 26,
+      penOffsetX: 0,
+      penOffsetY: 0,
+    }),
+  });
+
+  editor.reflowDeadLineCommandPath();
+
+  const arc = commands[1];
+  const travel = commands[3];
+  const followingTurn = commands[4];
+  assert.equal(travel.fromX, arc.x);
+  assert.equal(travel.fromY, arc.y);
+  assert.ok(Math.abs(Math.hypot(travel.x - travel.fromX, travel.y - travel.fromY) - 70) < 1e-9);
+  assert.ok(Math.hypot(travel.x - 260, travel.y - 230) > 1);
+  assert.equal(followingTurn.x, travel.x);
+  assert.equal(followingTurn.y, travel.y);
+});
+
+test("reflow keeps a following turn-in-place arc at the recalculated cube position", () => {
+  const config = core.withDefaults({
+    drawSpeed: 20,
+    travelSpeed: 20,
+    deadArcMmPerSecAtDrawSpeed: 55.43,
+    deadMmPerSecAtTravelSpeed: 70,
+    deadWheelBaseMm: 26,
+    penOffsetX: -20,
+    penOffsetY: 0,
+  });
+  const commands = [
+    { type: "pen", state: "down", penX: 0, penY: 0 },
+    {
+      type: "motor", kind: "draw", geometry: "arc", segmentId: "seg-0",
+      leftSpeed: 8, rightSpeed: 16, durationMs: 1000,
+      fromX: 0, fromY: 0, x: 10, y: 10, theta: 20, startTheta: 0,
+      center: { x: 0, y: 10 }, radius: 10, startAngle: -90, sweepAngle: 90,
+    },
+    { type: "pen", state: "up", penX: 0, penY: 0 },
+    {
+      type: "motor", kind: "travel", geometry: "line", segmentId: "seg-1",
+      speed: 20, durationMs: 1000,
+      fromX: 10, fromY: 10, x: 230, y: 238, theta: 90,
+    },
+    {
+      type: "motor", kind: "draw", geometry: "arc", segmentId: "seg-2",
+      turnInPlace: true, motionModel: "differential-drive",
+      leftSpeed: 8, rightSpeed: -8, durationMs: 1000,
+      fromX: 230, fromY: 238, x: 230, y: 238, theta: 280, startTheta: 0,
+      center: { x: 230, y: 238 }, radius: 8, startAngle: 220, sweepAngle: -80,
+      cubePreviewPoints: [{ x: 230, y: 238, theta: 0 }],
+      penPreviewPoints: [{ x: 230, y: 218 }],
+    },
+  ];
+  const editor = loadCommandEditor({
+    commands,
+    overrides: new Map(),
+    plotterCore: {
+      integrateDifferentialDrive: core.integrateDifferentialDrive,
+      differentialPreviewPoints: core.differentialPreviewPoints,
+    },
+    cubeToPen: core.cubeToPen,
+    getConfig: () => config,
+  });
+
+  editor.reflowDeadLineCommandPath();
+
+  const travel = commands[3];
+  const turn = commands[4];
+  assert.equal(turn.center.x, travel.x);
+  assert.equal(turn.center.y, travel.y);
+  assert.equal(turn.fromX, travel.x);
+  assert.equal(turn.fromY, travel.y);
+  assert.equal(turn.x, travel.x);
+  assert.equal(turn.y, travel.y);
+  assert.ok(turn.cubePreviewPoints.length > 2);
+  assert.ok(turn.penPreviewPoints.length > 2);
+  const expectedStartPen = core.cubeToPen({ x: travel.x, y: travel.y }, turn.startTheta, config);
+  assert.ok(Math.hypot(turn.penPreviewPoints[0].x - expectedStartPen.x, turn.penPreviewPoints[0].y - expectedStartPen.y) < 1e-9);
 });
 
 test("edited arc with equal wheel speeds becomes a line", () => {
