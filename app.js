@@ -223,6 +223,7 @@ window.__toioTest = {
     return {
       penDownSegments: preview.penDownSegments,
       segmentPenPaths: [...preview.segmentPenPaths.entries()],
+      waitPoints: preview.waitPoints,
       cubePath: preview.cubePath,
     };
   },

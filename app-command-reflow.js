@@ -29,6 +29,13 @@
           }
           continue;
         }
+        if (command.type === "wait") {
+          if (currentPen && command.penX != null) {
+            command.penX = currentPen.x;
+            command.penY = currentPen.y;
+          }
+          continue;
+        }
         if (command.type === "turn") {
           if (!currentCube && command.x != null && command.y != null) currentCube = { x: command.x, y: command.y };
           if ((command.motionModel === "differential-drive" || (command.leftSpeed != null && command.rightSpeed != null)) && currentCube) {

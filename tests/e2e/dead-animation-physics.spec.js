@@ -1141,3 +1141,31 @@ test("keroppi turn animation reaches its commanded heading without overshoot", a
     expect(delta, `turn command ${turn.commandIndex + 1}`).toBeLessThan(1);
   }
 });
+
+test("editing the first cat command reflows subsequent wait positions", async ({ page }) => {
+  await page.goto("/");
+  await page.selectOption("#sampleSelect", "samples/json/cat-face.json");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+  const before = await page.evaluate(() => window.__toioTest.getCommands());
+  const waitIndex = before.findIndex((command) => command.type === "wait");
+  expect(waitIndex).toBeGreaterThan(0);
+  const beforeWait = before[waitIndex];
+  const firstDuration = page.locator('#toioCommandOutput input[data-command-key="durationMs"]').first();
+  const originalDuration = Number(await firstDuration.inputValue());
+  await firstDuration.fill(String(originalDuration + 1000));
+  await firstDuration.blur();
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const after = await page.evaluate(() => window.__toioTest.getCommands());
+  const afterWait = after[waitIndex];
+  const previousPen = after[waitIndex - 1];
+  const totalDuration = await page.evaluate(() => window.__toioTest.getAnimationSnapshot().durationMs);
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), totalDuration);
+  const waitPoint = (await page.evaluate(() => window.__toioTest.getDeadPreview())).waitPoints[0];
+  expect(Math.hypot(afterWait.penX - beforeWait.penX, afterWait.penY - beforeWait.penY), JSON.stringify({ beforeWait, afterWait })).toBeGreaterThan(1);
+  expect(afterWait.penX).toBeCloseTo(previousPen.penX, 6);
+  expect(afterWait.penY).toBeCloseTo(previousPen.penY, 6);
+  expect(waitPoint.x).toBeCloseTo(afterWait.penX, 6);
+  expect(waitPoint.y).toBeCloseTo(afterWait.penY, 6);
+});
