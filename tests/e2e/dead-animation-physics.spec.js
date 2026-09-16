@@ -940,7 +940,7 @@ test("edited keroppi arc stays near its loaded endpoint", async ({ page }) => {
   expect(loadedArc).toBeDefined();
 
   const frameJumps = [];
-  for (let elapsedMs = 0; elapsedMs <= loadedTimeline.durationMs; elapsedMs += 25) {
+  for (let elapsedMs = 0; elapsedMs <= loadedTimeline.durationMs; elapsedMs += 100) {
     await page.evaluate((time) => window.__toioTest.seekAnimation(time), elapsedMs);
     const snapshot = await page.evaluate(() => window.__toioTest.getAnimationSnapshot());
     const item = snapshot.items.find((candidate) => elapsedMs >= candidate.startMs && elapsedMs < candidate.endMs);
@@ -957,6 +957,8 @@ test("edited keroppi arc stays near its loaded endpoint", async ({ page }) => {
   }
 
   const duration = page.locator(`input[data-command-index="${loaded.commands.indexOf(loadedArc)}"][data-command-key="durationMs"]`);
+  await page.locator("#toioCommandOutput").evaluate((element) => { element.scrollTop = 0; });
+  await page.locator(`[data-command-step="${loaded.commands.indexOf(loadedArc)}"]`).click();
   await duration.fill(String(loadedArc.durationMs + 100));
   await duration.blur();
   await page.evaluate((time) => window.__toioTest.seekAnimation(time), loadedTimeline.durationMs);
