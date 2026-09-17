@@ -5,7 +5,7 @@ const circleSample = require("../samples/json/circle.json");
 const waveSample = require("../samples/json/wave.json");
 const catFaceSample = require("../samples/json/cat-face.json");
 const coderSample = require("../samples/json/coder.json");
-const dojoSample = require("../samples/json/dojo.json");
+const toioSample = require("../samples/json/toio.json");
 const keroppiOutlineSample = require("../samples/json/keroppi-outline.json");
 const stackChanSample = require("../samples/json/stack-chan.json");
 const starSample = require("../samples/json/star.json");
@@ -1031,35 +1031,93 @@ test("star sample dead reckoning draw segments preserve the sample size", () => 
   assert.deepEqual(drawBounds, rawBounds);
 });
 
-test("coder and dojo samples use straight segments for lowercase o", () => {
-  for (const { sample, edgeCount } of [
-    { sample: coderSample, edgeCount: 4 },
-    { sample: dojoSample, edgeCount: 4 },
-  ]) {
-    const result = core.createDeadReckoningSimulation({
-      strokes: sample.strokes,
-      config: core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: -48, penOffsetY: 0 }),
-    });
-    const hasSpin = sample.strokes.some((stroke) => stroke.primitives?.some((primitive) => primitive.kind === "spin"));
-    const closedLineO = sample.strokes.some((stroke) => {
-      const primitives = stroke.primitives || [];
-      if (primitives.length !== edgeCount || !primitives.every((primitive) => primitive.kind === "line")) return false;
-      return core.distance(primitives[0].start, primitives[primitives.length - 1].end) < 0.1;
-    });
+test("coder sample uses one primitive per requested compact letter shape", () => {
+  const result = core.createDeadReckoningSimulation({
+    strokes: coderSample.strokes,
+    config: core.withDefaults({ smoothing: 0, lineCorrection: 0, penOffsetX: -48, penOffsetY: 0 }),
+  });
 
-    assert.deepEqual(result.errors, []);
-    assert.equal(hasSpin, false);
-    assert.equal(closedLineO, true);
-  }
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(coderSample.strokes.slice(0, 5).map((stroke) => stroke.primitives.map((primitive) => primitive.kind)), [
+    ["arc"],
+    ["arc"],
+    ["arc", "line"],
+    ["line", "arc"],
+    ["line", "arc"],
+  ]);
+  assert.equal(coderSample.strokes[1].primitives[0].sweepAngle, 360);
+  assert.deepEqual(coderSample.strokes.slice(1, 5).flatMap((stroke) => stroke.primitives.filter((primitive) => primitive.kind === "arc").map((primitive) => primitive.motionModel)), [
+    "turn-in-place",
+    "turn-in-place",
+    "turn-in-place",
+    "turn-in-place",
+  ]);
+  assert.equal(coderSample.strokes[2].primitives[1].end.y, 185);
+  assert.equal(coderSample.strokes[3].primitives[1].sweepAngle, -315);
+  assert.ok(Math.abs(coderSample.strokes[4].primitives[1].sweepAngle) < 180);
+  assert.equal(Math.max(...coderSample.strokes[2].raw.map((point) => point.y)), Math.max(...coderSample.strokes[1].raw.map((point) => point.y)));
+  assert.equal(Math.max(...coderSample.strokes[0].raw.map((point) => point.y)), Math.max(...coderSample.strokes[1].raw.map((point) => point.y)));
+  assert.equal(coderSample.strokes[4].primitives[0].start.x, coderSample.strokes[4].primitives[0].end.x);
+  assert.equal(coderSample.strokes[4].primitives[0].end.y, 220);
+  assert.equal(coderSample.strokes[4].primitives[1].center.y, 230);
+  assert.equal(coderSample.strokes[3].primitives[0].start.x, coderSample.strokes[3].primitives[1].center.x - 20);
+  assert.equal(coderSample.strokes[3].primitives[0].end.x, coderSample.strokes[3].primitives[1].center.x + 20);
+  assert.ok(coderSample.strokes.slice(0, 5).flatMap((stroke) => stroke.raw).every((point) => point.y <= 255));
 });
 
-test("dojo sample draws the j dot with the same point wait as stack-chan eyes", () => {
-  const dojoDot = dojoSample.strokes.flatMap((stroke) => stroke.primitives || []).find((primitive) => primitive.kind === "point");
+test("toio sample draws the j dot with the same point wait as stack-chan eyes", () => {
+  const toioDot = toioSample.strokes.flatMap((stroke) => stroke.primitives || []).find((primitive) => primitive.kind === "point");
   const stackChanEye = stackChanSample.strokes[0].primitives.find((primitive) => primitive.kind === "point");
 
-  assert.ok(dojoDot);
+  assert.ok(toioDot);
   assert.ok(stackChanEye);
-  assert.equal(dojoDot.waitMs, stackChanEye.waitMs);
+  assert.equal(toioDot.waitMs, stackChanEye.waitMs);
+});
+
+test("toio sample uses t, turn-in-place o, i, and turn-in-place o", () => {
+  const result = core.createDeadReckoningSimulation({
+    strokes: toioSample.strokes,
+    config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+  });
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(toioSample.strokes.map((stroke) => stroke.primitives.map((primitive) => primitive.kind)), [
+    ["line", "line"],
+    ["arc"],
+    ["point", "line"],
+    ["arc"],
+  ]);
+  assert.equal(toioSample.strokes[1].primitives[0].motionModel, "turn-in-place");
+  assert.equal(toioSample.strokes[3].primitives[0].motionModel, "turn-in-place");
+  assert.equal(toioSample.strokes[0].primitives[1].start.y, 225);
+  assert.equal(toioSample.strokes[0].primitives[1].end.y, 290);
+  assert.equal(toioSample.strokes[1].primitives[0].center.y + 20, toioSample.strokes[0].primitives[1].end.y);
+  assert.equal(toioSample.strokes[0].primitives[0].start.x, 158);
+  assert.equal(toioSample.strokes[3].primitives[0].center.x, 323);
+});
+
+test("coder sample includes the compact Dojo section below Coder", () => {
+  const result = core.createDeadReckoningSimulation({
+    strokes: coderSample.strokes,
+    config: core.withDefaults({ smoothing: 0, lineCorrection: 0 }),
+  });
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(coderSample.strokes.slice(5).map((stroke) => stroke.primitives.map((primitive) => primitive.kind)), [
+    ["line", "arc"],
+    ["arc"],
+    ["point"],
+    ["line", "arc"],
+    ["arc"],
+  ]);
+  assert.equal(coderSample.strokes[6].primitives[0].motionModel, "turn-in-place");
+  assert.equal(coderSample.strokes[9].primitives[0].motionModel, "turn-in-place");
+  assert.equal(coderSample.strokes[5].primitives[1].radius, coderSample.strokes[0].primitives[0].radius);
+  assert.equal(coderSample.strokes[8].primitives[1].sweepAngle, 120);
+  assert.equal(coderSample.strokes[9].primitives[0].center.x, 300);
+  assert.ok(Math.max(...coderSample.strokes[6].raw.map((point) => point.y)) < Math.max(...coderSample.strokes[5].raw.map((point) => point.y)));
+  assert.equal(coderSample.strokes[7].primitives[0].point.x, 260);
+  assert.equal(coderSample.strokes[6].primitives[0].center.y, coderSample.strokes[9].primitives[0].center.y);
 });
 
 test("cat face command 66 starts drawing at the preceding pen position", () => {

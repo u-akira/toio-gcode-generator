@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "name": "toio",
+  "mat": { "minX": 98, "minY": 142, "maxX": 402, "maxY": 358 },
+  "strokes": [
+    {
+      "primitives": [
+        { "kind": "line", "start": { "x": 158, "y": 235 }, "end": { "x": 198, "y": 235 } },
+        { "kind": "line", "start": { "x": 178, "y": 225 }, "end": { "x": 178, "y": 290 } }
+      ],
+      "raw": [
+        { "x": 158, "y": 235 }, { "x": 198, "y": 235 }, { "x": 178, "y": 225 }, { "x": 178, "y": 290 }
+      ]
+    },
+    {
+      "primitives": [
+        { "kind": "arc", "motionModel": "turn-in-place", "center": { "x": 223, "y": 270 }, "radius": 20, "startAngle": 0, "startHeading": 0, "sweepAngle": 360 }
+      ],
+      "raw": [
+        { "x": 203, "y": 270 }, { "x": 223, "y": 250 }, { "x": 243, "y": 270 },
+        { "x": 223, "y": 290 }, { "x": 203, "y": 270 }
+      ]
+    },
+    {
+      "primitives": [
+        { "kind": "point", "point": { "x": 268, "y": 220 }, "waitMs": 1000 },
+        { "kind": "line", "start": { "x": 268, "y": 245 }, "end": { "x": 268, "y": 295 } }
+      ],
+      "raw": [
+        { "x": 268, "y": 220 }, { "x": 268, "y": 245 }, { "x": 268, "y": 295 }
+      ]
+    },
+    {
+      "primitives": [
+        { "kind": "arc", "motionModel": "turn-in-place", "center": { "x": 323, "y": 270 }, "radius": 20, "startAngle": 0, "startHeading": 0, "sweepAngle": 360 }
+      ],
+      "raw": [
+        { "x": 303, "y": 270 }, { "x": 323, "y": 250 }, { "x": 343, "y": 270 },
+        { "x": 323, "y": 290 }, { "x": 303, "y": 270 }
+      ]
+    }
+  ]
+}
