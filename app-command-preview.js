@@ -26,7 +26,7 @@
           const command = commandList[commandIndex];
           if (command.type === "pen") {
             const nextDraw = command.state === "down"
-              ? commandList.slice(commandIndex + 1).find((candidate) => candidate.type === "motor" && candidate.kind === "draw" && Array.isArray(candidate.penPreviewPoints))
+              ? nextPenDownDrawCommand(commandList, commandIndex + 1)
               : null;
             const eventPoint = nextDraw?.penPreviewPoints?.[0]
               ? { ...nextDraw.penPreviewPoints[0] }
@@ -79,6 +79,17 @@
       function commandPointOrCurrentPen(command, state) {
         if (command.penX != null && command.penY != null) return { x: command.penX, y: command.penY };
         if (state.currentPen) return { ...state.currentPen };
+        return null;
+      }
+
+      function nextPenDownDrawCommand(commands, startIndex) {
+        for (let index = startIndex; index < commands.length; index += 1) {
+          const candidate = commands[index];
+          if (candidate.type === "pen") return null;
+          if (candidate.type === "motor" && candidate.kind === "draw" && Array.isArray(candidate.penPreviewPoints)) {
+            return candidate;
+          }
+        }
         return null;
       }
   
@@ -226,4 +237,3 @@
 
   root.ToioPlotterCommandPreview = { createCommandPreviewBuilder };
 })(typeof globalThis !== "undefined" ? globalThis : window);
-

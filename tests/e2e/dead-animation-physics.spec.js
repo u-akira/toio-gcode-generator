@@ -856,6 +856,48 @@ test("triangle command 6 straight animates continuously before reaching its endp
   expect(result.preview.y).toBeLessThan(Math.max(result.command.fromY, result.command.y));
 });
 
+test("completed edited triangle drawing keeps pen-down strokes separate", async ({ page }) => {
+  await page.goto("/");
+  await page.selectOption("#sampleSelect", "samples/json/triangle.json");
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const duration = page.locator('input[data-command-index="8"][data-command-key="durationMs"]');
+  await duration.fill("2000");
+  await duration.blur();
+  await page.click("#simulateBtn");
+  await expect(page.locator("#simStatus")).toHaveClass(/ok/);
+
+  const totalDuration = await page.evaluate(() => window.__toioTest.getAnimationSnapshot().durationMs);
+  await page.evaluate((time) => window.__toioTest.seekAnimation(time), totalDuration - 1);
+  await page.click("#simPauseBtn");
+  await page.clock.runFor(100);
+
+  const result = await page.evaluate(() => ({
+    animation: window.__toioTest.getAnimationSnapshot(),
+    commands: window.__toioTest.getCommands(),
+    preview: window.__toioTest.getDeadPreview(),
+  }));
+  expect(result.animation).toBeNull();
+  expect(result.preview.penDownSegments).toHaveLength(3);
+
+  const firstStroke = result.preview.penDownSegments[0];
+  expect(firstStroke[0].x).toBeCloseTo(250, 5);
+  expect(firstStroke[0].y).toBeCloseTo(190, 5);
+  expect(firstStroke.at(-1).x).toBeCloseTo(result.commands[2].penX, 5);
+  expect(firstStroke.at(-1).y).toBeCloseTo(result.commands[2].penY, 5);
+
+  for (const [penIndex, motorIndex, segmentId] of [[7, 8, "seg-1"], [13, 14, "seg-2"]]) {
+    const stroke = result.preview.penDownSegments[segmentId === "seg-1" ? 1 : 2];
+    const commandPath = result.preview.segmentPenPaths.find(([id]) => id === segmentId)?.[1];
+    expect(commandPath).toBeDefined();
+    expect(stroke[0].x).toBeCloseTo(result.commands[penIndex].penX, 5);
+    expect(stroke[0].y).toBeCloseTo(result.commands[penIndex].penY, 5);
+    expect(stroke.at(-1).x).toBeCloseTo(result.commands[motorIndex].penX, 3);
+    expect(stroke.at(-1).y).toBeCloseTo(result.commands[motorIndex].penY, 3);
+  }
+});
+
 test("edited wave arc animation remains physically continuous", async ({ page }) => {
   await page.goto("/");
   await page.locator("#importInput").setInputFiles("data/wave-copy-paper.json");

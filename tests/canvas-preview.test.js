@@ -109,6 +109,51 @@ test("dead command preview keeps drawn segments after pen up", () => {
   assert.equal(Math.round(preview.penDownSegments[0].at(-1).x), 67);
 });
 
+test("pen-down anchor does not borrow a preview from a later stroke", () => {
+  const config = core.withDefaults({ drawSpeed: 20, penOffsetX: 0, penOffsetY: 0 });
+  const renderer = loadCanvasRenderer({ config });
+  const preview = renderer.__test.buildDeadCommandPreview([
+    { type: "pen", state: "down", penX: 10, penY: 20 },
+    {
+      type: "motor",
+      kind: "draw",
+      geometry: "line",
+      segmentId: "seg-0",
+      fromX: 10,
+      fromY: 20,
+      x: 40,
+      y: 20,
+      theta: 0,
+      durationMs: 100,
+      penX: 40,
+      penY: 20,
+    },
+    { type: "pen", state: "up", penX: 40, penY: 20 },
+    { type: "pen", state: "down", penX: 200, penY: 200 },
+    {
+      type: "motor",
+      kind: "draw",
+      geometry: "line",
+      segmentId: "seg-1",
+      fromX: 200,
+      fromY: 200,
+      x: 240,
+      y: 200,
+      theta: 0,
+      durationMs: 100,
+      penX: 240,
+      penY: 200,
+      cubePreviewPoints: [{ x: 200, y: 200, theta: 0 }, { x: 240, y: 200, theta: 0 }],
+      penPreviewPoints: [{ x: 200, y: 200 }, { x: 240, y: 200 }],
+    },
+  ]);
+
+  assert.equal(preview.penDownSegments[0][0].x, 10);
+  assert.equal(preview.penDownSegments[0][0].y, 20);
+  assert.equal(preview.penDownSegments[0].at(-1).x, 40);
+  assert.equal(preview.penDownSegments[0].at(-1).y, 20);
+});
+
 test("dead command preview keeps pen-down wait points as drawing output", () => {
   const config = core.withDefaults({ drawSpeed: 20, penOffsetX: 0, penOffsetY: 0 });
   const renderer = loadCanvasRenderer({ config });

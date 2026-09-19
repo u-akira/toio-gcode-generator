@@ -166,6 +166,11 @@
         command.x = endCube.x;
         command.y = endCube.y;
         command.theta = theta;
+        // The executor rebuilds a straight path from these updated endpoints.
+        // Keeping the planner's old preview points would restore its old target
+        // when the timeline normalizes a completed command.
+        delete command.cubePreviewPoints;
+        delete command.penPreviewPoints;
         currentCube = endCube;
         currentTheta = theta;
         currentPen = cubeToPen(endCube, theta, config);
